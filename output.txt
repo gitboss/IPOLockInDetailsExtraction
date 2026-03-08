@@ -1,0 +1,26 @@
+Traceback (most recent call last):
+======================================================================
+IPO Lock-in Processor v2.0
+======================================================================
+Exchange: NSE
+File: AAKAAR-CML68761.pdf
+Mode: DRY RUN
+======================================================================
+
+STEPS:
+  File "F:\python\IPOLockInDetailsExtraction\app.py", line 538, in <module>
+    main()
+  File "F:\python\IPOLockInDetailsExtraction\app.py", line 533, in main
+    exit_code = processor.process()
+                ^^^^^^^^^^^^^^^^^^^
+  File "F:\python\IPOLockInDetailsExtraction\app.py", line 450, in process
+    step_num = self.validate_files(step_num)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\python\IPOLockInDetailsExtraction\app.py", line 148, in validate_files
+    self.log_step(step_num, "\u2699", "Validating file paths")
+  File "F:\python\IPOLockInDetailsExtraction\app.py", line 123, in log_step
+    print(f"  {step_num}. {status} {prefix}{message}")
+  File "C:\Users\BLUENILE\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2699' in position 5: character maps to <undefined>

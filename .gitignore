@@ -1,0 +1,13 @@
+downloads/
+downloads/unlock/pdf/json/
+downloads/unlock/pdf/*.pdf
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.md
+debug_*.php
+debug_*.py
+test_*.py
+test_*.txt
+test_*.php

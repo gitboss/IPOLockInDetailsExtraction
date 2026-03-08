@@ -1,0 +1,132 @@
+"""
+SHP (Shareholding Pattern) Parser
+Unified parser for both NSE and BSE SHP TXT files
+Uses CASCADE of 8 strategies from production code
+"""
+
+from pathlib import Path
+from models import SHPData
+from shp_parser_production_unified import extract_shp_values_from_text_java as extract_shp_with_cascade
+
+
+def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed: int = None, known_locked: int = None) -> SHPData:
+    """
+    Parse SHP TXT file using CASCADE of 8 strategies (unified for NSE and BSE)
+
+    Args:
+        txt_path: Path to SHP *_java.txt file
+        known_total: Declared total from sme_ipo_master (may have inaccuracies)
+        total_hint_computed: Computed total from lock-in PDF (most reliable)
+        known_locked: Known locked shares from lock-in (optional)
+
+    Returns:
+        SHPData with total, locked, promoter, public, others
+
+    Raises:
+        FileNotFoundError: If txt_path doesn't exist
+        ValueError: If extraction fails with all strategies
+    """
+    if not txt_path.exists():
+        raise FileNotFoundError(f"SHP TXT file not found: {txt_path}")
+
+    # Read file
+    with open(txt_path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    # Extract using cascade of 8 strategies
+    result = extract_shp_with_cascade(
+        text=text,
+        annexure_total=known_total,
+        lockin_locked_hint=known_locked
+    )
+
+    # Check if extraction succeeded
+    if not result.get('all_values_found'):
+        # Partial extraction - warn but continue
+        print(f"⚠️  Warning: Partial SHP extraction from {txt_path.name}")
+        print(f"   Strategy: {result.get('strategy_used')}")
+        print(f"   Found: promoter={result.get('promoter_found')}, public={result.get('public_found')}, other={result.get('other_found')}")
+
+    # Validate math if we have all values
+    if result.get('promoter_shares') and result.get('public_shares'):
+        computed_total = (result.get('promoter_shares') or 0) + \
+                        (result.get('public_shares') or 0) + \
+                        (result.get('other_shares') or 0)
+
+        if result.get('total_shares'):
+            diff = abs(computed_total - result.get('total_shares'))
+            if diff > 100:  # More than 100 shares difference = problem
+                print(f"⚠️  Warning: Math mismatch in {txt_path.name}")
+                print(f"   Promoter+Public+Others ({computed_total:,}) != Total ({result.get('total_shares'):,})")
+
+    # Create SHPData
+    return SHPData(
+        total_shares=result.get('total_shares') or 0,
+        locked_shares=result.get('shp_locked_total') or 0,
+        promoter_shares=result.get('promoter_shares') or 0,
+        public_shares=result.get('public_shares') or 0,
+        others_shares=result.get('other_shares') or 0,
+    )
+
+
+def main():
+    """Test parser with sample file"""
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python parser_shp.py <path_to_shp_java.txt> [declared_total] [computed_total] [known_locked]")
+        print("Example: python parser_shp.py downloads/bse/pdf/shp/txt/544324-CITICHEM-Annexure-II_java.txt 1800000 1800000 1500000")
+        sys.exit(1)
+
+    txt_path = Path(sys.argv[1])
+    known_total = int(sys.argv[2]) if len(sys.argv) >= 3 else None
+    total_hint_computed = int(sys.argv[3]) if len(sys.argv) >= 4 else None
+    known_locked = int(sys.argv[4]) if len(sys.argv) >= 5 else None
+
+    print(f"Parsing SHP: {txt_path}")
+    if known_total:
+        print(f"Declared Total:  {known_total:,}")
+    if total_hint_computed:
+        print(f"Computed Total:  {total_hint_computed:,}")
+    if known_locked:
+        print(f"Known Locked:    {known_locked:,}")
+    print("=" * 70)
+
+    try:
+        result = parse_shp_file(txt_path, known_total, total_hint_computed, known_locked)
+
+        print(f"\n✓ SHP Data Extracted:")
+        print(f"  Total Shares:    {result.total_shares:,}")
+        print(f"  Locked Shares:   {result.locked_shares:,}")
+        if result.total_shares > 0:
+            print(f"  Promoter:        {result.promoter_shares:,} ({result.promoter_shares/result.total_shares*100:.1f}%)")
+            print(f"  Public:          {result.public_shares:,} ({result.public_shares/result.total_shares*100:.1f}%)")
+            print(f"  Others:          {result.others_shares:,} ({result.others_shares/result.total_shares*100:.1f}%)")
+        else:
+            print(f"  Promoter:        {result.promoter_shares:,}")
+            print(f"  Public:          {result.public_shares:,}")
+            print(f"  Others:          {result.others_shares:,}")
+
+        # Validation
+        computed = result.promoter_shares + result.public_shares + result.others_shares
+        print(f"\n  Computed Sum:    {computed:,}")
+        print(f"  Difference:      {abs(computed - result.total_shares):,}")
+
+        # Show if known totals match
+        if known_total:
+            match = "✓" if result.total_shares == known_total else "✗"
+            print(f"\n  {match} Total Match:    {result.total_shares:,} vs {known_total:,}")
+
+        if known_locked:
+            match = "✓" if result.locked_shares == known_locked else "✗"
+            print(f"  {match} Locked Match:   {result.locked_shares:,} vs {known_locked:,}")
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
