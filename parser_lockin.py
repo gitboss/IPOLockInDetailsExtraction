@@ -425,12 +425,21 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> 
     with open(txt_path, 'r', encoding='utf-8') as f:
         text = f.read()
 
-    # Try BSE parser first, then fallback to general parser
-    result = parse_bse_text(text)
+    # Detect exchange from file path
+    path_str = str(txt_path).lower().replace('\\', '/')
+    is_nse = '/nse/' in path_str
+    is_bse = '/bse/' in path_str
 
-    # If BSE parser found no rows, try general parser
-    if not result.get('rows'):
+    # For NSE files, use general parser directly (BSE parser extracts wrong dates for NSE format)
+    # For BSE files, try BSE parser first, then fallback to general parser
+    if is_nse:
         result = parse_lockin_table(text)
+    else:
+        result = parse_bse_text(text)
+
+        # If BSE parser found no rows, try general parser
+        if not result.get('rows'):
+            result = parse_lockin_table(text)
 
     # Convert production parser results to LockinData model
     rows = []
@@ -446,8 +455,17 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> 
             to_date = parse_date(date_str)
 
         # Determine row status
-        is_free = row_dict.get('is_free', False)
-        row_status = RowStatus.FREE if is_free else RowStatus.LOCKED
+        # Check if lock-in has expired (to_date is in the past)
+        from datetime import date as date_type
+        today = date_type.today()
+
+        if to_date and to_date < today:
+            # Lock-in expired → FREE
+            row_status = RowStatus.FREE
+        else:
+            # Use raw parser's classification
+            is_free = row_dict.get('is_free', False)
+            row_status = RowStatus.FREE if is_free else RowStatus.LOCKED
 
         # Calculate bucket
         bucket = calculate_bucket(allotment_date, from_date, to_date) if allotment_date else LockBucket.FREE
@@ -457,6 +475,8 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> 
             shares=row_dict['shares'],
             distinctive_from=row_dict.get('from', 0),
             distinctive_to=row_dict.get('to', 0),
+            security_type=row_dict.get('type_security', ''),
+            share_form=row_dict.get('physical_demat', ''),
             lockin_date_from=from_date,
             lockin_date_to=to_date,
             status=row_status,
@@ -466,6 +486,9 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> 
 
     # Create LockinData
     lockin_data = LockinData(rows=rows)
+
+    # Store declared_total from parsing result (if extracted from TOTAL line)
+    lockin_data.declared_total = result.get('declared_total')
 
     # Compute totals
     lockin_data.compute_totals()

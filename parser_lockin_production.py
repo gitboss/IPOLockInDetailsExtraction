@@ -37,13 +37,19 @@ def extract_table_rows(text: str) -> List[Dict]:
     for i, line in enumerate(lines):
         line = line.strip()
 
+        # Remove spaces within numbers (e.g., "1 234567" → "1234567")
+        # Uses lookahead to avoid consuming next digit, handles commas too
+        # TEMPORARILY COMMENTED OUT TO DEBUG
+        # line = re.sub(r'(\d)\s+(?=[\d,])', r'\1', line)
+
         # Skip empty lines and headers
         if not line or 'Distinctive' in line or 'Lock in' in line or 'Equity' in line:
             continue
 
         # Look for lines starting with digits (share count)
         # Pattern: digits followed by spaces/tabs, then more digits (from), then digits (to), then date/Free
-        match = re.match(r'(\d[\d,]*)\s+(\d[\d,]*)\s+(\d[\d,]*)\s+(.+)', line)
+        # Now accepts decimals: (\d[\d,.]*) to handle "303091.00"
+        match = re.match(r'(\d[\d,.]*)\s+(\d[\d,.]*)\s+(\d[\d,.]*)\s+(.+)', line)
 
         if match:
             shares_str = match.group(1).replace(',', '')

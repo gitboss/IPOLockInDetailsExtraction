@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Fixture Test Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .summary {
+            background: white;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+        }
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .match {
+            color: green;
+            font-weight: bold;
+        }
+        .mismatch {
+            color: red;
+            font-weight: bold;
+        }
+        .error {
+            background-color: #ffebee;
+        }
+        .warning {
+            background-color: #fff9c4;
+        }
+        .sample-rows {
+            font-size: 0.9em;
+            color: #666;
+        }
+        .nse {
+            background-color: #e3f2fd;
+        }
+        .bse {
+            background-color: #fff3e0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Fixture Test Report</h1>
+    <div class="summary">
+        <strong>Generated:</strong> 2026-03-09 19:55:47<br>
+        <strong>Total Fixtures:</strong> 63<br>
+        <strong>NSE:</strong> 30 | <strong>BSE:</strong> 33
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Exchange</th>
+                <th>Fixture File</th>
+                <th>Rows</th>
+                <th>Free</th>
+                <th>Locked</th>
+                <th>Computed Total</th>
+                <th>Declared Total</th>
+                <th>Match</th>
+                <th>Distinct Errors</th>
+                <th>Sample Rows</th>
+            </tr>
+        </thead>
+        <tbody>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_2digit_numeric.txt</td>
+                <td>7</td>
+                <td>1</td>
+                <td>6</td>
+                <td><strong>18,752,000</strong></td>
+                <td>18,752,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,844,552 (19-Dec-26)<br>3,752,000 (19-Dec-28)<br>2,496,000 (19-Dec-27)<br>... +4 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_2digit_year.txt</td>
+                <td>8</td>
+                <td>1</td>
+                <td>7</td>
+                <td><strong>11,000,000</strong></td>
+                <td>11,000,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,420,000 (05-Jun-28)<br>2,614,960 (05-Jun-27)<br>2,615,040 (05-Jun-26)<br>... +5 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_4digit_ordinal.txt</td>
+                <td>11</td>
+                <td>1</td>
+                <td>10</td>
+                <td><strong>14,172,816</strong></td>
+                <td>14,172,816</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">4,618,436 (30-Jun-2026)<br>2,237,814 (30-Jun-2028)<br>1,224,550 (30-Jun-2026)<br>... +8 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_asterisk_space.txt</td>
+                <td>15</td>
+                <td>3</td>
+                <td>12</td>
+                <td><strong>17,257,570</strong></td>
+                <td>17,257,570</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">181,528 (02-Jan-2027)<br>10,046 (Free)<br>88 (02-Jan-2029)<br>... +12 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_complex_18.txt</td>
+                <td>18</td>
+                <td>1</td>
+                <td>17</td>
+                <td><strong>19,148,000</strong></td>
+                <td>19,148,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">165,800 (03-Sep-2026)<br>80,000 (12-May-2026)<br>118,400 (03-Sep-2026)<br>... +15 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_decimal.txt</td>
+                <td>12</td>
+                <td>1</td>
+                <td>11</td>
+                <td><strong>15,000,000</strong></td>
+                <td>15,000,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,500,000 (19-Dec-2028)<br>1,680,000 (19-Dec-2027)<br>1,680,000 (19-Dec-2026)<br>... +9 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_large_21rows.txt</td>
+                <td>23</td>
+                <td>1</td>
+                <td>22</td>
+                <td><strong>14,183,544</strong></td>
+                <td>14,183,544</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">296,135 (10-Dec-2026)<br>10 (10-Dec-2026)<br>86,921 (10-Dec-2026)<br>... +20 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_10.txt</td>
+                <td>9</td>
+                <td>1</td>
+                <td>8</td>
+                <td><strong>17,964,950</strong></td>
+                <td>17,964,950</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">5,477,690 (31-Aug-2026)<br>2,422,690 (31-Aug-2027)<br>354,620 (31-Aug-2028)<br>... +6 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_11.txt</td>
+                <td>10</td>
+                <td>3</td>
+                <td>7</td>
+                <td><strong>10,177,128</strong></td>
+                <td>10,177,128</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">553,693 (12-Dec-2026)<br>2,036,750 (12-Dec-2028)<br>2,028,332 (12-Dec-2027)<br>... +7 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_12.txt</td>
+                <td>10</td>
+                <td>1</td>
+                <td>9</td>
+                <td><strong>8,084,434</strong></td>
+                <td>8,084,434</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,569,498 (20-Nov-2027)<br>1,569,498 (20-Nov-2026)<br>870,760 (20-Nov-2026)<br>... +7 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_13a.txt</td>
+                <td>12</td>
+                <td>1</td>
+                <td>11</td>
+                <td><strong>14,138,000</strong></td>
+                <td>14,138,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">840,000 (15-Aug-2026)<br>725,000 (15-Aug-2027)<br>950,000 (15-Aug-2028)<br>... +9 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_13b.txt</td>
+                <td>14</td>
+                <td>1</td>
+                <td>13</td>
+                <td><strong>24,047,112</strong></td>
+                <td>24,047,112</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,404,925 (10-Dec-2028)<br>3,187,938 (10-Dec-2027)<br>3,188,065 (10-Dec-2026)<br>... +11 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_13c.txt</td>
+                <td>12</td>
+                <td>2</td>
+                <td>10</td>
+                <td><strong>17,645,800</strong></td>
+                <td>17,645,800</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">544,010 (10-Aug-2026)<br>1,775,000 (10-Aug-2028)<br>1,910,000 (10-Aug-2027)<br>... +9 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_14.txt</td>
+                <td>14</td>
+                <td>2</td>
+                <td>12</td>
+                <td><strong>19,368,000</strong></td>
+                <td>19,368,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">4 (06-Feb-2027)<br>5,000 (06-Feb-2029)<br>3,496 (06-Feb-2028)<br>... +11 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_15a.txt</td>
+                <td>12</td>
+                <td>1</td>
+                <td>11</td>
+                <td><strong>18,600,000</strong></td>
+                <td>18,600,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,585,720 (09-Aug-2026)<br>594,280 (09-Aug-2027)<br>1,242,000 (09-Aug-2028)<br>... +9 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_15b.txt</td>
+                <td>12</td>
+                <td>1</td>
+                <td>11</td>
+                <td><strong>11,479,600</strong></td>
+                <td>11,479,600</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">690,000 (28-Dec-2028)<br>844,400 (28-Dec-2027)<br>843,600 (28-Dec-2026)<br>... +9 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_17rows.txt</td>
+                <td>18</td>
+                <td>2</td>
+                <td>16</td>
+                <td><strong>10,297,380</strong></td>
+                <td>10,297,380</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,124,532 (26-Aug-2028)<br>1,160,374 (26-Aug-2027)<br>1,160,374 (26-Aug-2026)<br>... +15 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_medium_9.txt</td>
+                <td>8</td>
+                <td>1</td>
+                <td>7</td>
+                <td><strong>10,805,400</strong></td>
+                <td>10,805,400</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">188,500 (13-Feb-2027)<br>2,377,188 (13-Feb-2029)<br>2,276,656 (13-Feb-2028)<br>... +5 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_mixed_all.txt</td>
+                <td>5</td>
+                <td>1</td>
+                <td>4</td>
+                <td><strong>13,878,600</strong></td>
+                <td>13,878,600</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,775,730 (15-Jul-2028)<br>6,752,870 (15-Jul-2026)<br>340,000 (04-Aug-2025)<br>... +2 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_na_dates.txt</td>
+                <td>6</td>
+                <td>1</td>
+                <td>5</td>
+                <td><strong>17,538,432</strong></td>
+                <td>17,538,432</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">820,814 (05-May-2026)<br>50 (05-May-2026)<br>6,319,097 (05-May-2026)<br>... +3 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_na_minimal.txt</td>
+                <td>3</td>
+                <td>1</td>
+                <td>2</td>
+                <td><strong>13,047,100</strong></td>
+                <td>13,047,100</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,648,000 (31-Mar-2028)<br>6,861,500 (31-Mar-2026)<br>3,537,600 (Free)</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_na_mixed.txt</td>
+                <td>7</td>
+                <td>2</td>
+                <td>5</td>
+                <td><strong>22,645,408</strong></td>
+                <td>22,645,408</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">794,000 (Free)<br>6,073,206 (24-Jan-2027)<br>6,073,118 (24-Jan-2028)<br>... +4 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_numeric_13rows.txt</td>
+                <td>12</td>
+                <td>1</td>
+                <td>11</td>
+                <td><strong>15,084,000</strong></td>
+                <td>15,084,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">121,600 (10-Jan-2027)<br>61,133 (09-Jan-2027)<br>277,500 (09-Jan-2028)<br>... +9 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_numeric_6rows.txt</td>
+                <td>5</td>
+                <td>2</td>
+                <td>3</td>
+                <td><strong>5,929,250</strong></td>
+                <td>5,929,250</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,304,435 (09-Oct-2028)<br>1,018,985 (09-Oct-2027)<br>1,995,830 (09-Oct-2026)<br>... +2 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_numeric_large.txt</td>
+                <td>16</td>
+                <td>1</td>
+                <td>15</td>
+                <td><strong>18,457,186</strong></td>
+                <td>18,457,186</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">53,420 (11-Feb-2027)<br>723,221 (11-Feb-2029)<br>785,380 (11-Feb-2028)<br>... +13 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_numeric_month.txt</td>
+                <td>4</td>
+                <td>1</td>
+                <td>3</td>
+                <td><strong>16,870,000</strong></td>
+                <td>16,870,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">3,380,748 (27-Jan-2029)<br>4,224,626 (27-Jan-2028)<br>4,614,626 (27-Jan-2027)<br>... +1 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_ordinals_space.txt</td>
+                <td>6</td>
+                <td>1</td>
+                <td>5</td>
+                <td><strong>15,015,016</strong></td>
+                <td>15,015,016</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">10 (30-Mar-2026)<br>3,018,019 (30-Mar-2028)<br>7,696,787 (30-Mar-2026)<br>... +3 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_small_5rows.txt</td>
+                <td>4</td>
+                <td>1</td>
+                <td>3</td>
+                <td><strong>22,207,848</strong></td>
+                <td>22,207,848</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">4,441,600 (11-Jun-2028)<br>11,047,248 (11-Jun-2026)<br>56,000 (11-Jun-2026)<br>... +1 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_small_6rows_space.txt</td>
+                <td>5</td>
+                <td>1</td>
+                <td>4</td>
+                <td><strong>11,116,000</strong></td>
+                <td>11,116,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">5,946,800 (21-May-2026)<br>2,223,200 (21-May-2028)<br>105,600 (17-Jun-2025)<br>... +2 more</td>
+            </tr>
+
+            <tr class="nse">
+                <td><strong>NSE</strong></td>
+                <td>nse_stress_50rows.txt</td>
+                <td>49</td>
+                <td>10</td>
+                <td>39</td>
+                <td><strong>24,452,064</strong></td>
+                <td>24,452,064</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,274,060 (24-Feb-2026)<br>650,800 (24-Feb-2028)<br>70,000 (24-Feb-2026)<br>... +46 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>544458-SHREEREF-Annexure-I_java.txt</td>
+                <td>6</td>
+                <td>1</td>
+                <td>5</td>
+                <td><strong>35,630,409</strong></td>
+                <td>35,630,409</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,430,383 (31-Jul-26)<br>13,675,954 (01-Aug-26)<br>7,127,000 (01-Aug-28)<br>... +3 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>544568-DSM-Annexure-I_java.txt</td>
+                <td>13</td>
+                <td>1</td>
+                <td>12</td>
+                <td><strong>22,287,138</strong></td>
+                <td>22,287,138</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">303,091 (2026-10-11)<br>19 (2026-10-11)<br>13,775 (2026-10-11)<br>... +10 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>544616-GALLARD-Annexure-I_java.txt</td>
+                <td>28</td>
+                <td>0</td>
+                <td>28</td>
+                <td><strong>9,500,000</strong></td>
+                <td>9,500,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">663,330 (2028-11-30)<br>737,460 (2027-11-30)<br>737,460 (2026-11-30)<br>... +25 more</td>
+            </tr>
+
+            <tr class="bse error">
+                <td><strong>BSE</strong></td>
+                <td>544676-YAJUR-Annexure-I_java.txt</td>
+                <td>2</td>
+                <td>0</td>
+                <td>2</td>
+                <td><strong>11,202,873</strong></td>
+                <td>11,202,873</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="mismatch">✗ 2</span></td>
+                <td class="sample-rows">6,639,694 (2027-01-24)<br><span style="color: red;">4,563,179 ≠ -663,969,487,190,844</span> (2028-01-24)</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>544711-KIAASA-Annexure-I_java.txt</td>
+                <td>4</td>
+                <td>1</td>
+                <td>3</td>
+                <td><strong>18,230,005</strong></td>
+                <td>18,230,005</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">3,648,000 (2029-03-03)<br>2,752,250 (2028-03-03)<br>6,338,755 (2027-03-03)<br>... +1 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_2digit_na.txt</td>
+                <td>9</td>
+                <td>1</td>
+                <td>8</td>
+                <td><strong>10,040,000</strong></td>
+                <td>10,040,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,336,000 (2026-11-06)<br>80,000 (2026-11-06)<br>299,400 (2026-11-06)<br>... +6 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_dash_15rows.txt</td>
+                <td>14</td>
+                <td>1</td>
+                <td>13</td>
+                <td><strong>8,164,000</strong></td>
+                <td>8,164,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,635,000 (2028-08-09)<br>1,462,300 (2027-08-09)<br>1,462,300 (2026-08-09)<br>... +11 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_dash_na_11.txt</td>
+                <td>10</td>
+                <td>10</td>
+                <td>0</td>
+                <td><strong>5,130,170</strong></td>
+                <td>5,130,170</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">384,069 (Free)<br>67,800 (Free)<br>851,200 (Free)<br>... +7 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_dash_na_15.txt</td>
+                <td>14</td>
+                <td>14</td>
+                <td>0</td>
+                <td><strong>11,280,000</strong></td>
+                <td>11,280,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">45,900 (Free)<br>82,800 (Free)<br>110,578 (Free)<br>... +11 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_dash_na_19.txt</td>
+                <td>18</td>
+                <td>18</td>
+                <td>0</td>
+                <td><strong>24,654,600</strong></td>
+                <td>24,654,600</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">45,925 (Free)<br>1,232,750 (Free)<br>1,497,975 (Free)<br>... +15 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_decimal_11rows.txt</td>
+                <td>10</td>
+                <td>1</td>
+                <td>9</td>
+                <td><strong>24,772,000</strong></td>
+                <td>24,772,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,175,000 (2026-06-09)<br>600,000 (2028-06-09)<br>641,370 (2026-06-09)<br>... +7 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_decimal_12rows.txt</td>
+                <td>12</td>
+                <td>1</td>
+                <td>11</td>
+                <td><strong>19,923,020</strong></td>
+                <td>19,923,020</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">10,500 (2028-10-05)<br>502 (2026-10-05)<br>4,716 (2028-10-05)<br>... +9 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_decimal_15rows.txt</td>
+                <td>14</td>
+                <td>1</td>
+                <td>13</td>
+                <td><strong>14,210,000</strong></td>
+                <td>14,210,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,900,000 (2028-08-10)<br>3,554,985 (2027-08-10)<br>3,555,015 (2026-08-10)<br>... +11 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_decimal_16rows.txt</td>
+                <td>15</td>
+                <td>1</td>
+                <td>14</td>
+                <td><strong>14,322,000</strong></td>
+                <td>14,322,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,432,500 (2028-08-14)<br>3,832,200 (2026-08-14)<br>1,432,500 (2028-08-14)<br>... +12 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_decimal_8rows.txt</td>
+                <td>8</td>
+                <td>2</td>
+                <td>6</td>
+                <td><strong>20,610,000</strong></td>
+                <td>20,610,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">10,610,000 (2026-01-27)<br>4,400,000 (2028-01-27)<br>350,400 (2025-02-19)<br>... +5 more</td>
+            </tr>
+
+            <tr class="bse error">
+                <td><strong>BSE</strong></td>
+                <td>bse_large_19rows.txt</td>
+                <td>17</td>
+                <td>1</td>
+                <td>16</td>
+                <td><strong>19,163,055</strong></td>
+                <td>19,163,055</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="mismatch">✗ 2</span></td>
+                <td class="sample-rows">4,083,663 (2027-09-30)<br><span style="color: red;">4,050,321 ≠ 4,050,319</span> (2027-09-30)<br>33,344 (2027-09-30)<br>... +14 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_large_20rows.txt</td>
+                <td>19</td>
+                <td>1</td>
+                <td>18</td>
+                <td><strong>10,279,200</strong></td>
+                <td>10,279,200</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,040,000 (2028-08-15)<br>2,673,250 (2026-08-15)<br>1,040,000 (2028-08-15)<br>... +16 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_large_22rows.txt</td>
+                <td>20</td>
+                <td>2</td>
+                <td>18</td>
+                <td><strong>8,481,100</strong></td>
+                <td>8,481,100</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,700,000 (2028-09-30)<br>1,738,625 (2027-09-30)<br>2,113,375 (2026-09-30)<br>... +17 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_na_6rows.txt</td>
+                <td>5</td>
+                <td>1</td>
+                <td>4</td>
+                <td><strong>4,430,000</strong></td>
+                <td>4,430,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">654,000 (2028-03-15)<br>993,400 (2026-03-15)<br>246,000 (2028-03-15)<br>... +2 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_na_decimal.txt</td>
+                <td>6</td>
+                <td>1</td>
+                <td>5</td>
+                <td><strong>18,881,400</strong></td>
+                <td>18,881,400</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">3,800,000 (2028-07-12)<br>9,846,250 (2026-07-12)<br>255,150 (2026-07-12)<br>... +3 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_single_2digit.txt</td>
+                <td>6</td>
+                <td>1</td>
+                <td>5</td>
+                <td><strong>24,426,990</strong></td>
+                <td>24,426,990</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">13,101,570 (2026-01-27)<br>4,885,400 (2028-01-27)<br>20 (2026-01-27)<br>... +3 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_single_slash.txt</td>
+                <td>4</td>
+                <td>1</td>
+                <td>3</td>
+                <td><strong>8,951,970</strong></td>
+                <td>8,951,970</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,875,000 (2028-09-30)<br>2,183,085 (2027-09-30)<br>2,273,085 (2026-09-30)<br>... +1 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_slash_12rows.txt</td>
+                <td>11</td>
+                <td>11</td>
+                <td>0</td>
+                <td><strong>17,891,440</strong></td>
+                <td>17,891,440</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">1,183,070 (Free)<br>500,000 (Free)<br>3,506,400 (Free)<br>... +8 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_slash_na_11.txt</td>
+                <td>10</td>
+                <td>10</td>
+                <td>0</td>
+                <td><strong>10,549,040</strong></td>
+                <td>10,549,040</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">62,000 (Free)<br>75,258 (Free)<br>325,000 (Free)<br>... +7 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_slash_na_12.txt</td>
+                <td>11</td>
+                <td>1</td>
+                <td>10</td>
+                <td><strong>14,156,000</strong></td>
+                <td>14,156,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">21,490 (2026-08-10)<br>64,470 (2026-08-10)<br>712,500 (2028-08-10)<br>... +8 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_slash_na_ipo.txt</td>
+                <td>3</td>
+                <td>1</td>
+                <td>2</td>
+                <td><strong>11,847,800</strong></td>
+                <td>11,847,800</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">6,350,200 (2026-04-08)<br>2,369,600 (2028-04-08)<br>3,128,000 (FREE)</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_slash_standard.txt</td>
+                <td>10</td>
+                <td>10</td>
+                <td>0</td>
+                <td><strong>8,876,000</strong></td>
+                <td>8,876,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">609,000 (Free)<br>437,250 (Free)<br>437,250 (Free)<br>... +7 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_small_5rows.txt</td>
+                <td>4</td>
+                <td>2</td>
+                <td>2</td>
+                <td><strong>13,613,000</strong></td>
+                <td>13,613,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">7,072,400 (2026-02-28)<br>2,722,600 (2028-02-28)<br>192,000 (FREE)<br>... +1 more</td>
+            </tr>
+
+            <tr class="bse error">
+                <td><strong>BSE</strong></td>
+                <td>bse_stress_42rows.txt</td>
+                <td>41</td>
+                <td>2</td>
+                <td>39</td>
+                <td><strong>22,331,242</strong></td>
+                <td>22,331,242</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="mismatch">✗ 4</span></td>
+                <td class="sample-rows">5,310,500 (2026-10-10)<br><span style="color: red;">5,310,500 ≠ -1,871,875</span> (2027-10-10)<br><span style="color: red;">4,500,217 ≠ 11,682,592</span> (2028-10-10)<br>... +38 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_zero_basic.txt</td>
+                <td>4</td>
+                <td>1</td>
+                <td>3</td>
+                <td><strong>6,299,952</strong></td>
+                <td>6,299,952</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,834,902 (2026-01-18)<br>1,259,990 (2028-01-18)<br>60 (2026-01-18)<br>... +1 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_zero_decimal.txt</td>
+                <td>7</td>
+                <td>1</td>
+                <td>6</td>
+                <td><strong>24,870,000</strong></td>
+                <td>24,870,000</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">727,310 (2026-08-10)<br>6,155,600 (2026-08-10)<br>6,013,090 (2027-08-10)<br>... +4 more</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_zero_rows.txt</td>
+                <td>3</td>
+                <td>3</td>
+                <td>0</td>
+                <td><strong>12,999,600</strong></td>
+                <td>12,999,600</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,990,000 (Free)<br>5,560,000 (Free)<br>4,449,600 (Free)</td>
+            </tr>
+
+            <tr class="bse">
+                <td><strong>BSE</strong></td>
+                <td>bse_zero_slash.txt</td>
+                <td>4</td>
+                <td>1</td>
+                <td>3</td>
+                <td><strong>5,262,792</strong></td>
+                <td>5,262,792</td>
+                <td><span class="match">✓ MATCH</span></td>
+                <td><span class="match">✓ 0</span></td>
+                <td class="sample-rows">2,537,042 (2026-01-15)<br>64,750 (2026-01-14)<br>1,065,000 (2028-01-15)<br>... +1 more</td>
+            </tr>
+
+        </tbody>
+    </table>
+</body>
+</html>

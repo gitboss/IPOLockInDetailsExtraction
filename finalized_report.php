@@ -48,29 +48,31 @@ try {
       p.processed_at, p.finalized_at,
       p.error_message,
       p.lockin_pdf_path, p.shp_pdf_path, p.lockin_png_path,
-      m.company_name, m.ipo_name, m.listing_date_actual
+      p.lockin_txt_java_path, p.shp_txt_java_path,
+      m.company_name, m.ipo_name, m.listing_date_actual,
+      m.nse_symbol, m.bse_script_code
     FROM ipo_processing_log p
     LEFT JOIN sme_ipo_master m
-      ON (p.exchange COLLATE utf8mb4_unicode_ci = 'BSE' COLLATE utf8mb4_unicode_ci 
+      ON (p.exchange COLLATE utf8mb4_unicode_ci = 'BSE' COLLATE utf8mb4_unicode_ci
           AND CAST(m.bse_script_code AS CHAR) COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(p.unique_symbol, ':', -1) COLLATE utf8mb4_unicode_ci)
-      OR (p.exchange COLLATE utf8mb4_unicode_ci = 'NSE' COLLATE utf8mb4_unicode_ci 
+      OR (p.exchange COLLATE utf8mb4_unicode_ci = 'NSE' COLLATE utf8mb4_unicode_ci
           AND UPPER(CAST(m.nse_symbol AS CHAR)) COLLATE utf8mb4_unicode_ci = UPPER(SUBSTRING_INDEX(p.unique_symbol, ':', -1)) COLLATE utf8mb4_unicode_ci)
     ORDER BY p.processed_at DESC
   ")->fetchAll();
 
   $rows_raw = $pdo->query("
     SELECT processing_log_id,
-           shares,
-           lockin_date_from AS lock_from,
+           MIN(lockin_date_from) AS lock_from,
            lockin_date_to   AS lock_upto,
            status           AS row_class,
            bucket           AS lock_bucket,
-           DATEDIFF(lockin_date_to, lockin_date_from) AS days_locked,
-           distinctive_from,
-           distinctive_to,
-           row_order
+           DATEDIFF(lockin_date_to, MIN(lockin_date_from)) AS days_locked,
+           MIN(security_type) AS type_raw,
+           SUM(shares)      AS shares,
+           COUNT(*)         AS _count
     FROM ipo_lockin_rows
-    ORDER BY processing_log_id, row_order
+    GROUP BY processing_log_id, lockin_date_to, status, bucket
+    ORDER BY processing_log_id, row_class, lockin_date_to
   ")->fetchAll();
 
   $rows_by_record = [];
@@ -81,11 +83,40 @@ try {
     $rows_by_record[$r['processing_log_id']][] = $r;
   }
 
+  $ungrouped_raw = $pdo->query("
+    SELECT processing_log_id,
+           lockin_date_from AS lock_from,
+           lockin_date_to   AS lock_upto,
+           status           AS row_class,
+           bucket           AS lock_bucket,
+           DATEDIFF(lockin_date_to, lockin_date_from) AS days_locked,
+           security_type    AS type_raw,
+           shares           AS shares,
+           1                AS _count
+    FROM ipo_lockin_rows
+    ORDER BY processing_log_id, row_order ASC
+  ")->fetchAll();
+
+  $ungrouped_by_record = [];
+  foreach ($ungrouped_raw as $r) {
+    $r['row_class'] = strtolower($r['row_class'] ?? 'free');
+    $r['lock_bucket'] = strtolower($r['lock_bucket'] ?? '');
+    $ungrouped_by_record[$r['processing_log_id']][] = $r;
+  }
+
   foreach ($records as &$rec) {
     $rec['rows'] = $rows_by_record[$rec['id']] ?? [];
-    // Map new schema fields to names expected by the JS renderer (old schema names)
-    $rec['symbol'] = $rec['unique_symbol'];
-    $rec['exchange_code'] = null;
+    $rec['overlay_rows'] = $ungrouped_by_record[$rec['id']] ?? [];
+    // Extract symbol and code from file_name (format: CODE-SYMBOL-Annexure-I.pdf)
+    if (preg_match('/^([0-9]+)-([A-Z\-]+)-Annexure-I\.pdf$/', $rec['file_name'], $matches)) {
+      $rec['exchange_code'] = $matches[1];  // e.g., 544324
+      $rec['symbol'] = $matches[2];         // e.g., CITICHEM
+    } else {
+      // Fallback: try to extract from unique_symbol
+      $parts = explode(':', $rec['unique_symbol']);
+      $rec['exchange_code'] = count($parts) > 1 ? $parts[1] : null;
+      $rec['symbol'] = $rec['nse_symbol'] ?? $rec['exchange_code'];
+    }
     $rec['company_name'] = $rec['company_name'] ?? $rec['ipo_name'] ?? null;
     $rec['listing_date_actual'] = $rec['listing_date_actual'] ?? null;
     $rec['promoter_shares'] = $rec['shp_promoter_shares'];
@@ -101,6 +132,8 @@ try {
     $rec['engines_used'] = 'pdfplumber+java';
     $rec['png_files'] = $rec['lockin_png_path'] ? [$rec['lockin_png_path']] : [];
     $rec['pdf_file'] = $rec['lockin_pdf_path'] ?? '';
+    $rec['lockin_txt_java'] = $rec['lockin_txt_java_path'] ?? '';
+    $rec['shp_txt_java'] = $rec['shp_txt_java_path'] ?? '';
     $rec['gemini_lockin_match'] = null;
     $rec['gemini_shp_match'] = null;
     $rec['gemini_split_match'] = null;
@@ -111,7 +144,6 @@ try {
     $rec['candidate_snapshots'] = [];
     $rec['candidate_total_match'] = null;
     $rec['candidate_shp_match'] = null;
-    $rec['listing_date_actual'] = $rec['processed_at'] ?? '';
   }
   unset($rec);
 
@@ -499,13 +531,33 @@ try {
       font-variant-numeric: tabular-nums;
     }
 
-    .c-class { width: 70px; }
-    .c-shares { width: 100px; }
-    .c-from { width: 90px; }
-    .c-upto { width: 90px; }
-    .c-days { width: 60px; }
-    .c-bucket { width: 80px; }
-    .c-type { width: 90px; }
+    .c-class {
+      width: 70px;
+    }
+
+    .c-shares {
+      width: 100px;
+    }
+
+    .c-from {
+      width: 90px;
+    }
+
+    .c-upto {
+      width: 90px;
+    }
+
+    .c-days {
+      width: 60px;
+    }
+
+    .c-bucket {
+      width: 80px;
+    }
+
+    .c-type {
+      width: 90px;
+    }
 
     .card-table tr:last-child td {
       border-bottom: none;
@@ -557,18 +609,21 @@ try {
       background: #261e10;
       color: var(--yellow);
     }
-    
-    .bk-years_1_plus, .bk-1-year {
+
+    .bk-years_1_plus,
+    .bk-1-year {
       background: #1a2e1a;
       color: var(--green);
     }
 
-    .bk-years_2_plus, .bk-2-years {
+    .bk-years_2_plus,
+    .bk-2-years {
       background: #162a16;
       color: #3da53d;
     }
 
-    .bk-years_3_plus, .bk-3-years {
+    .bk-years_3_plus,
+    .bk-3-years {
       background: #122212;
       color: #379137;
     }
@@ -581,6 +636,45 @@ try {
     .bk-anchor_90_days {
       background: #271d3a;
       color: #a37eee;
+    }
+
+    .bk-anchor_30days,
+    .bk-anchor_30 {
+      background: #2a1f3d;
+      color: var(--purple);
+    }
+
+    .bk-anchor_90days,
+    .bk-anchor_90 {
+      background: #271d3a;
+      color: #a37eee;
+    }
+
+    .bk-1+year,
+    .bk-1-year,
+    .bk-1_year,
+    .bk-years_1_plus,
+    .bk-1-year {
+      background: #1a2e1a;
+      color: var(--green);
+    }
+
+    .bk-2+years,
+    .bk-2-years,
+    .bk-2_year,
+    .bk-years_2_plus,
+    .bk-2-years {
+      background: #162a16;
+      color: #3da53d;
+    }
+
+    .bk-3+years,
+    .bk-3-years,
+    .bk-3_year,
+    .bk-years_3_plus,
+    .bk-3-years {
+      background: #122212;
+      color: #379137;
     }
 
     /* No rows */
@@ -1049,18 +1143,6 @@ try {
         <option value="NSE">NSE</option>
       </select>
     </label>
-    <label>Status
-      <select id="filter-status">
-        <option value="">All</option>
-        <option value="PASS">PASS</option>
-        <option value="SHP_PASS">SHP_PASS</option>
-        <option value="SHP_FAIL">SHP_FAIL</option>
-        <option value="FAIL">FAIL</option>
-        <option value="FINALIZED">FINALIZED</option>
-        <option value="VALIDATING">VALIDATING</option>
-        <option value="FAILED">FAILED</option>
-      </select>
-    </label>
     <label>Finalized
       <select id="filter-finalized">
         <option value="">All</option>
@@ -1071,19 +1153,17 @@ try {
     <label>Bucket
       <select id="filter-bucket">
         <option value="">All</option>
-        <option value="anchor_30">Anchor 30d</option>
-        <option value="anchor_90">Anchor 90d</option>
-        <option value="1_year">1 Year</option>
-        <option value="2_year">2 Year</option>
-        <option value="3_year">3 Year+</option>
-        <option value="unknown">Unknown</option>
+        <option value="anchor_30days">Anchor 30d</option>
+        <option value="anchor_90days">Anchor 90d</option>
+        <option value="1+year">1 Year</option>
+        <option value="2+years">2 Year</option>
+        <option value="3+years">3 Year+</option>
         <option value="free">Free</option>
       </select>
     </label>
     <label>Sort
       <select id="sort-by">
-        <option value="processed_at" selected>Processed Date ↓</option>
-        <option value="listing_date_actual">Listing Date ↓</option>
+        <option value="listing_date_actual" selected>Listing Date ↓</option>
         <option value="symbol">Symbol</option>
         <option value="allotment_date">Allotment Date</option>
         <option value="company_name">Company Name</option>
@@ -1157,8 +1237,13 @@ try {
           <div class="table-wrap">
             <table class="edit-rows-table">
               <colgroup>
-                <col class="c-class"><col class="c-shares"><col class="c-from">
-                <col class="c-upto"><col class="c-days"><col class="c-bucket"><col class="c-type">
+                <col class="c-class">
+                <col class="c-shares">
+                <col class="c-from">
+                <col class="c-upto">
+                <col class="c-days">
+                <col class="c-bucket">
+                <col class="c-type">
               </colgroup>
               <thead>
                 <tr>
@@ -1167,6 +1252,7 @@ try {
                   <th>Lock From</th>
                   <th>Lock Upto</th>
                   <th>Bucket</th>
+                  <th>Type</th>
                 </tr>
               </thead>
               <tbody id="edit-rows-tbody"></tbody>
@@ -1187,6 +1273,20 @@ try {
     function fmt(n) {
       if (n == null || n === '') return '-';
       return Number(n).toLocaleString('en-IN');
+    }
+
+    function fmtBucket(bucket) {
+      if (!bucket) return '-';
+      const map = {
+        'anchor_30days': 'Anchor 30d',
+        'anchor_90days': 'Anchor 90d',
+        '1+year': '1 Year',
+        '2+years': '2 Years',
+        '3+years': '3 Years+',
+        'free': 'Free',
+        'unknown': 'Unknown'
+      };
+      return map[bucket.toLowerCase()] || bucket;
     }
 
     function getEffectiveStatus(s) {
@@ -1240,14 +1340,45 @@ try {
         return `<span class="match-none">${st}</span>`;
       })();
 
-      const pdfPath = (s.pdf_file || s.lockin_pdf_path || '').replace(/\\/g, '/');
-      const pngPath = Array.isArray(s.png_files) && s.png_files.length ? s.png_files[0].replace(/\\/g, '/') : '';
+      // Build file paths - finalized files are moved to 'finalized/' subfolder in same directory
+      const pdfFile = (s.pdf_file || s.lockin_pdf_path || '').replace(/\\/g, '/');
+      const pdfName = pdfFile ? pdfFile.split('/').pop() : '';
+      const stem = pdfName ? pdfName.replace(/\.pdf$/i, '') : '';
+      const shpName = s.exchange === 'BSE' ? pdfName.replace('I.', 'II.') : 'SHP-' + (s.symbol || '') + '.pdf';
 
-      const linksHtml = (pdfPath || pngPath) ? `
+      // Build base paths by extracting directory from stored paths
+      const pdfBase = pdfFile ? pdfFile.substring(0, pdfFile.lastIndexOf('/') + 1) : '';
+      const shpBase = s.shp_pdf_path ? s.shp_pdf_path.replace(/\\/g, '/').substring(0, s.shp_pdf_path.replace(/\\/g, '/').lastIndexOf('/') + 1) : pdfBase.replace('pdf/lockin', 'pdf/shp');
+      const pngBase = Array.isArray(s.png_files) && s.png_files.length
+        ? s.png_files[0].replace(/\\/g, '/').substring(0, s.png_files[0].replace(/\\/g, '/').lastIndexOf('/') + 1)
+        : pdfBase.replace('pdf/lockin', 'pdf/lockin/png');
+
+      // TXT file paths from database
+      const lockinTxtFile = (s.lockin_txt_java || '').replace(/\\/g, '/');
+      const shpTxtFile = (s.shp_txt_java || '').replace(/\\/g, '/');
+      const lockinTxtBase = lockinTxtFile ? lockinTxtFile.substring(0, lockinTxtFile.lastIndexOf('/') + 1) : '';
+      const shpTxtBase = shpTxtFile ? shpTxtFile.substring(0, shpTxtFile.lastIndexOf('/') + 1) : '';
+
+      // For finalized files, insert '/finalized/' into the path
+      const pdfPathFinalized = isFinalized && pdfBase ? pdfBase.replace(/\/pdf\/lockin\/$/, '/pdf/lockin/finalized/') : pdfBase;
+      const shpPathFinalized = isFinalized && shpBase ? shpBase.replace(/\/pdf\/shp\/$/, '/pdf/shp/finalized/') : shpBase;
+      const pngPathFinalized = isFinalized && pngBase ? pngBase.replace(/\/pdf\/lockin\/png\/$/, '/pdf/lockin/png/finalized/') : pngBase;
+      const lockinTxtPathFinalized = isFinalized && lockinTxtBase ? lockinTxtBase.replace(/\/txt\/$/, '/txt/finalized/') : lockinTxtBase;
+      const shpTxtPathFinalized = isFinalized && shpTxtBase ? shpTxtBase.replace(/\/txt\/$/, '/txt/finalized/') : shpTxtBase;
+
+      // Get filenames
+      const lockinTxtName = lockinTxtFile ? lockinTxtFile.split('/').pop() : (stem + '_java.txt');
+      const shpStem = s.exchange === 'BSE' ? stem.replace('Annexure-I', 'Annexure-II') : 'SHP-' + (s.symbol || '');
+      const shpTxtName = shpTxtFile ? shpTxtFile.split('/').pop() : (shpStem + '_java.txt');
+
+      const linksHtml = pdfName ? `
     <div class="card-links">
-      ${pdfPath ? `<a class="link-btn" href="${pdfPath}" target="_blank">📄 Lock-in PDF</a>` : ''}
-      ${s.shp_pdf_path ? `<a class="link-btn" href="${s.shp_pdf_path}" target="_blank">📊 SHP PDF</a>` : ''}
-      ${pngPath ? `<a class="link-btn" href="${pngPath}" target="_blank">🖼 PNG</a>` : ''}
+      <a class="link-btn" href="${pdfPathFinalized}${pdfName}" target="_blank">📄 PDF</a>
+      <a class="link-btn" href="${shpPathFinalized}${shpName}" target="_blank">📊 SHP PDF</a>
+      <a class="link-btn" href="${pngPathFinalized}${stem}.png" target="_blank">🖼 PNG</a>
+      <span style="color:var(--muted);margin:0 4px">|</span>
+      <a class="link-btn" href="${lockinTxtPathFinalized}${lockinTxtName}" target="_blank">📝 Lock-in TXT</a>
+      <a class="link-btn" href="${shpTxtPathFinalized}${shpTxtName}" target="_blank">📝 SHP TXT</a>
     </div>` : '';
 
       const rowsHtml = (s.rows || []).length === 0
@@ -1264,12 +1395,12 @@ try {
         <tbody>
           ${(s.rows || []).map(r => `<tr>
             <td class="rc-${r.row_class || 'free'}">${r.row_class || '-'}</td>
-            <td class="num">${fmt(r.shares)}</td>
+            <td class="num">${fmt(r.shares)}${(+r._count || 0) > 1 ? ` <small style="color:var(--muted)">(${r._count})</small>` : ''}</td>
             <td>${r.lock_from || '<span style="color:var(--muted)">-</span>'}</td>
             <td>${r.lock_upto || '<span style="color:var(--muted)">-</span>'}</td>
-            <td class="num">${r.days_locked || '-'}</td>
-            <td><span class="bucket-pill bk-${(r.lock_bucket || 'free').replace(/[^a-z0-9_]/g, '-')}">${r.lock_bucket || '-'}</span></td>
-            <td>${r.type_raw || '-'}</td>
+            <td class="num">${r.days_locked != null ? r.days_locked + 'd' : '<span style="color:var(--muted)">-</span>'}</td>
+            <td><span class="bucket-pill bk-${(r.lock_bucket || 'free').replace(/[^a-z0-9_]/g, '-')}">${fmtBucket(r.lock_bucket || '')}</span></td>
+            <td style="color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.type_raw || '').replace(/"/g, '&quot;')}">${r.type_raw || '-'}</td>
           </tr>`).join('')}
         </tbody>
       </table></div>`;
@@ -1278,15 +1409,16 @@ try {
       return `
   <div class="scrip-card" id="sc-${s.id}">
     <div class="card-header">
-      <div style="display:flex;flex-direction:column;gap:1px">
-        <span class="card-symbol">${s.symbol || s.unique_symbol || ''}</span>
-        ${companyName ? `<span style="font-size:11px;color:var(--muted);font-weight:400">${companyName}</span>` : ''}
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="card-symbol">${s.symbol || s.unique_symbol || ''}</span>
+          ${s.exchange_code ? `<span style="font-size:11px;color:var(--muted)">${s.exchange_code}</span>` : ''}
+        </div>
       </div>
       <span class="badge ex-${s.exchange || 'BSE'}">${s.exchange || ''}</span>
       <span class="badge st-${effectiveStatus.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}">${effectiveStatus}</span>
       <span style="font-size:11px">${validStr}</span>
       <span style="font-size:11px">${finalizedStr}</span>
-      ${s.listing_date_actual ? `<span style="font-size:11px;color:var(--muted)">Listed: ${s.listing_date_actual}</span>` : ''}
       <button class="edit-btn" onclick="openDetailOverlay(${s.id})" title="View detail">📋 Detail</button>
     </div>
     <div class="card-meta" style="display:grid;grid-template-columns:110px 180px 120px 140px 120px 100px;gap:12px 20px;padding:8px 16px;font-size:11px">
@@ -1350,7 +1482,6 @@ try {
     function render() {
       const q = document.getElementById('search').value.trim().toLowerCase();
       const exch = document.getElementById('filter-exchange').value;
-      const status = document.getElementById('filter-status').value;
       const finalizedFilter = document.getElementById('filter-finalized').value;
       const bucket = document.getElementById('filter-bucket').value;
       const sortBy = document.getElementById('sort-by').value;
@@ -1362,8 +1493,6 @@ try {
           if (!sym.includes(q) && !comp.includes(q)) return false;
         }
         if (exch && (s.exchange || '').toUpperCase() !== exch) return false;
-        const st = s.effective_status || getEffectiveStatus(s);
-        if (status && st !== status) return false;
         if (finalizedFilter !== '' && String(s.finalized ? 1 : 0) !== finalizedFilter) return false;
         if (bucket && !(s.rows || []).some(r => (r.lock_bucket || '').toLowerCase() === bucket)) return false;
         return true;
@@ -1373,7 +1502,7 @@ try {
         const av = a[sortBy] ?? '';
         const bv = b[sortBy] ?? '';
         if (typeof av === 'number' && typeof bv === 'number') return bv - av;
-        if (sortBy === 'processed_at' || sortBy === 'allotment_date') return String(bv).localeCompare(String(av));
+        if (sortBy === 'allotment_date' || sortBy === 'listing_date_actual') return String(bv).localeCompare(String(av));
         return String(av).localeCompare(String(bv));
       });
 
@@ -1415,19 +1544,20 @@ try {
       // Rows table
       const tbody = document.getElementById('edit-rows-tbody');
       tbody.innerHTML = '';
-      (s.rows || []).forEach(r => {
+      (s.overlay_rows || s.rows || []).forEach(r => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td class="rc-${r.row_class || 'free'}">${r.row_class || '-'}</td>
-          <td>${fmt(r.shares)}</td>
+          <td>${fmt(r.shares)}${(+r._count || 0) > 1 ? ` <small style="color:var(--muted)">(${r._count})</small>` : ''}</td>
           <td>${r.lock_from || '-'}</td>
           <td>${r.lock_upto || '-'}</td>
-          <td><span class="bucket-pill bk-${(r.lock_bucket || 'free').replace(/[^a-z0-9_]/g, '-')}">${r.lock_bucket || '-'}</span></td>
+          <td><span class="bucket-pill bk-${(r.lock_bucket || 'free').replace(/[^a-z0-9_]/g, '-')}">${fmtBucket(r.lock_bucket || '')}</span></td>
+          <td style="color:var(--muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.type_raw || '').replace(/"/g, '&quot;')}">${r.type_raw || '-'}</td>
         `;
         tbody.appendChild(tr);
       });
       if (!s.rows || !s.rows.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center">No rows</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);text-align:center">No rows</td></tr>';
       }
 
       // PNG
@@ -1499,9 +1629,13 @@ try {
       if (e.target === document.getElementById('edit-overlay')) closeEditOverlay();
     });
 
-    ['search', 'filter-exchange', 'filter-status', 'filter-finalized', 'filter-bucket', 'sort-by'].forEach(id =>
-      document.getElementById(id).addEventListener('input', render)
-    );
+    ['search', 'filter-exchange', 'filter-finalized', 'filter-bucket', 'sort-by'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', render);
+        el.addEventListener('change', render);
+      }
+    });
 
     loadData();
   </script>

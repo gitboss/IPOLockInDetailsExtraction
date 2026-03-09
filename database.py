@@ -120,6 +120,8 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             validation_results = VALUES(validation_results),
             all_rules_passed = VALUES(all_rules_passed),
             failed_rules = VALUES(failed_rules),
+            error_message = NULL,
+            finalized_at = NULL,  -- Clear old finalization timestamp when reprocessing
             processed_at = NOW()
     """
 
@@ -254,7 +256,7 @@ def mark_finalized(processing_log_id: int) -> bool:
     """
     sql = """
         UPDATE ipo_processing_log
-        SET status = 'FINALIZED', finalized_at = NOW()
+        SET status = 'FINALIZED', finalized_at = NOW(), error_message = NULL
         WHERE id = %s
     """
 

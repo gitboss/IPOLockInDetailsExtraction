@@ -11,3 +11,4 @@ debug_*.py
 test_*.py
 test_*.txt
 test_*.php
+fixtures/

@@ -1,0 +1,189 @@
+====================================================================================================
+FIXTURE TEST REPORT - Total: 59 (NSE: 30, BSE: 29)
+====================================================================================================
+
+✓ PASS                    nse/nse_2digit_numeric.txt                    Rows:  7 Free:  1 Locked:  6
+                          Computed:  18,752,000 Declared:18,752,000   ✓
+
+✓ PASS                    nse/nse_2digit_year.txt                       Rows:  8 Free:  1 Locked:  7
+                          Computed:  11,000,000 Declared:11,000,000   ✓
+
+✓ PASS                    nse/nse_4digit_ordinal.txt                    Rows: 11 Free:  1 Locked: 10
+                          Computed:  14,172,816 Declared:14,172,816   ✓
+
+✓ PASS                    nse/nse_asterisk_space.txt                    Rows: 15 Free:  3 Locked: 12
+                          Computed:  17,257,570 Declared:17,257,570   ✓
+
+✓ PASS                    nse/nse_complex_18.txt                        Rows: 18 Free:  1 Locked: 17
+                          Computed:  19,148,000 Declared:19,148,000   ✓
+
+✓ PASS                    nse/nse_decimal.txt                           Rows: 12 Free:  1 Locked: 11
+                          Computed:  15,000,000 Declared:15,000,000   ✓
+
+✓ PASS                    nse/nse_large_21rows.txt                      Rows: 23 Free:  1 Locked: 22
+                          Computed:  14,183,544 Declared:14,183,544   ✓
+
+✓ PASS                    nse/nse_medium_10.txt                         Rows:  9 Free:  1 Locked:  8
+                          Computed:  17,964,950 Declared:17,964,950   ✓
+
+✓ PASS                    nse/nse_medium_11.txt                         Rows: 10 Free:  3 Locked:  7
+                          Computed:  10,177,128 Declared:10,177,128   ✓
+
+✓ PASS                    nse/nse_medium_12.txt                         Rows: 10 Free:  1 Locked:  9
+                          Computed:   8,084,434 Declared:8,084,434    ✓
+
+✓ PASS                    nse/nse_medium_13a.txt                        Rows: 12 Free:  1 Locked: 11
+                          Computed:  14,138,000 Declared:14,138,000   ✓
+
+✓ PASS                    nse/nse_medium_13b.txt                        Rows: 14 Free:  1 Locked: 13
+                          Computed:  24,047,112 Declared:24,047,112   ✓
+
+✓ PASS                    nse/nse_medium_13c.txt                        Rows: 12 Free:  2 Locked: 10
+                          Computed:  17,645,800 Declared:17,645,800   ✓
+
+✓ PASS                    nse/nse_medium_14.txt                         Rows: 14 Free:  2 Locked: 12
+                          Computed:  19,368,000 Declared:19,368,000   ✓
+
+✓ PASS                    nse/nse_medium_15a.txt                        Rows: 12 Free:  1 Locked: 11
+                          Computed:  18,600,000 Declared:18,600,000   ✓
+
+✓ PASS                    nse/nse_medium_15b.txt                        Rows: 12 Free:  1 Locked: 11
+                          Computed:  11,479,600 Declared:11,479,600   ✓
+
+✓ PASS                    nse/nse_medium_17rows.txt                     Rows: 18 Free:  2 Locked: 16
+                          Computed:  10,297,380 Declared:10,297,380   ✓
+
+✓ PASS                    nse/nse_medium_9.txt                          Rows:  8 Free:  1 Locked:  7
+                          Computed:  10,805,400 Declared:10,805,400   ✓
+
+✓ PASS                    nse/nse_mixed_all.txt                         Rows:  5 Free:  1 Locked:  4
+                          Computed:  13,878,600 Declared:13,878,600   ✓
+
+✓ PASS                    nse/nse_na_dates.txt                          Rows:  6 Free:  1 Locked:  5
+                          Computed:  17,538,432 Declared:17,538,432   ✓
+
+✓ PASS                    nse/nse_na_minimal.txt                        Rows:  3 Free:  1 Locked:  2
+                          Computed:  13,047,100 Declared:13,047,100   ✓
+
+✓ PASS                    nse/nse_na_mixed.txt                          Rows:  7 Free:  2 Locked:  5
+                          Computed:  22,645,408 Declared:22,645,408   ✓
+
+✓ PASS                    nse/nse_numeric_13rows.txt                    Rows: 12 Free:  1 Locked: 11
+                          Computed:  15,084,000 Declared:15,084,000   ✓
+
+✓ PASS                    nse/nse_numeric_6rows.txt                     Rows:  5 Free:  2 Locked:  3
+                          Computed:   5,929,250 Declared:5,929,250    ✓
+
+✓ PASS                    nse/nse_numeric_large.txt                     Rows: 16 Free:  1 Locked: 15
+                          Computed:  18,457,186 Declared:18,457,186   ✓
+
+✓ PASS                    nse/nse_numeric_month.txt                     Rows:  4 Free:  1 Locked:  3
+                          Computed:  16,870,000 Declared:16,870,000   ✓
+
+✓ PASS                    nse/nse_ordinals_space.txt                    Rows:  6 Free:  1 Locked:  5
+                          Computed:  15,015,016 Declared:15,015,016   ✓
+
+✓ PASS                    nse/nse_small_5rows.txt                       Rows:  4 Free:  1 Locked:  3
+                          Computed:  22,207,848 Declared:22,207,848   ✓
+
+✓ PASS                    nse/nse_small_6rows_space.txt                 Rows:  5 Free:  1 Locked:  4
+                          Computed:  11,116,000 Declared:11,116,000   ✓
+
+✓ PASS                    nse/nse_stress_50rows.txt                     Rows: 49 Free: 10 Locked: 39
+                          Computed:  24,452,064 Declared:24,452,064   ✓
+
+✓ PASS                    bse/544568-DSM-Annexure-I_java.txt            Rows: 13 Free:  1 Locked: 12
+                          Computed:  22,287,138 Declared:22,287,138   ✓
+
+✓ PASS                    bse/bse_2digit_na.txt                         Rows:  9 Free:  1 Locked:  8
+                          Computed:  10,040,000 Declared:10,040,000   ✓
+
+✓ PASS                    bse/bse_dash_15rows.txt                       Rows: 14 Free:  1 Locked: 13
+                          Computed:   8,164,000 Declared:8,164,000    ✓
+
+✓ PASS                    bse/bse_dash_na_11.txt                        Rows: 10 Free:  1 Locked:  9
+                          Computed:   5,130,170 Declared:5,130,170    ✓
+
+✓ PASS                    bse/bse_dash_na_15.txt                        Rows: 14 Free:  1 Locked: 13
+                          Computed:  11,280,000 Declared:11,280,000   ✓
+
+✓ PASS                    bse/bse_dash_na_19.txt                        Rows: 18 Free:  2 Locked: 16
+                          Computed:  24,654,600 Declared:24,654,600   ✓
+
+✓ PASS                    bse/bse_decimal_11rows.txt                    Rows: 10 Free:  1 Locked:  9
+                          Computed:  24,772,000 Declared:24,772,000   ✓
+
+✓ PASS                    bse/bse_decimal_12rows.txt                    Rows: 12 Free:  1 Locked: 11
+                          Computed:  19,923,020 Declared:19,923,020   ✓
+
+✓ PASS                    bse/bse_decimal_15rows.txt                    Rows: 14 Free:  1 Locked: 13
+                          Computed:  14,210,000 Declared:14,210,000   ✓
+
+✓ PASS                    bse/bse_decimal_16rows.txt                    Rows: 15 Free:  1 Locked: 14
+                          Computed:  14,322,000 Declared:14,322,000   ✓
+
+✓ PASS                    bse/bse_decimal_8rows.txt                     Rows:  8 Free:  2 Locked:  6
+                          Computed:  20,610,000 Declared:20,610,000   ✓
+
+✗ DISTINCTIVE ERROR       bse/bse_large_19rows.txt                      Rows: 17 Free:  1 Locked: 16
+                          Computed:  19,163,055 Declared:19,163,055   ✓
+                          Distinctive Errors: 1
+  Row 2: 4,050,321 ≠ 4,050,319
+
+✓ PASS                    bse/bse_large_20rows.txt                      Rows: 19 Free:  1 Locked: 18
+                          Computed:  10,279,200 Declared:10,279,200   ✓
+
+✓ PASS                    bse/bse_large_22rows.txt                      Rows: 20 Free:  2 Locked: 18
+                          Computed:   8,481,100 Declared:8,481,100    ✓
+
+✓ PASS                    bse/bse_na_6rows.txt                          Rows:  5 Free:  1 Locked:  4
+                          Computed:   4,430,000 Declared:4,430,000    ✓
+
+✓ PASS                    bse/bse_na_decimal.txt                        Rows:  6 Free:  1 Locked:  5
+                          Computed:  18,881,400 Declared:18,881,400   ✓
+
+✓ PASS                    bse/bse_single_2digit.txt                     Rows:  6 Free:  1 Locked:  5
+                          Computed:  24,426,990 Declared:24,426,990   ✓
+
+✓ PASS                    bse/bse_single_slash.txt                      Rows:  4 Free:  1 Locked:  3
+                          Computed:   8,951,970 Declared:8,951,970    ✓
+
+✓ PASS                    bse/bse_slash_12rows.txt                      Rows: 11 Free:  1 Locked: 10
+                          Computed:  17,891,440 Declared:17,891,440   ✓
+
+✓ PASS                    bse/bse_slash_na_11.txt                       Rows: 10 Free:  1 Locked:  9
+                          Computed:  10,549,040 Declared:10,549,040   ✓
+
+✓ PASS                    bse/bse_slash_na_12.txt                       Rows: 11 Free:  1 Locked: 10
+                          Computed:  14,156,000 Declared:14,156,000   ✓
+
+✓ PASS                    bse/bse_slash_na_ipo.txt                      Rows:  3 Free:  1 Locked:  2
+                          Computed:  11,847,800 Declared:11,847,800   ✓
+
+✓ PASS                    bse/bse_slash_standard.txt                    Rows: 10 Free:  1 Locked:  9
+                          Computed:   8,876,000 Declared:8,876,000    ✓
+
+✓ PASS                    bse/bse_small_5rows.txt                       Rows:  4 Free:  2 Locked:  2
+                          Computed:  13,613,000 Declared:13,613,000   ✓
+
+✗ DISTINCTIVE ERROR       bse/bse_stress_42rows.txt                     Rows: 41 Free:  2 Locked: 39
+                          Computed:  22,331,242 Declared:22,331,242   ✓
+                          Distinctive Errors: 2
+  Row 2: 5,310,500 ≠ -1,871,875
+  Row 3: 4,500,217 ≠ 11,682,592
+
+✓ PASS                    bse/bse_zero_basic.txt                        Rows:  4 Free:  1 Locked:  3
+                          Computed:   6,299,952 Declared:6,299,952    ✓
+
+✓ PASS                    bse/bse_zero_decimal.txt                      Rows:  7 Free:  1 Locked:  6
+                          Computed:  24,870,000 Declared:24,870,000   ✓
+
+✓ PASS                    bse/bse_zero_rows.txt                         Rows:  3 Free:  1 Locked:  2
+                          Computed:  12,999,600 Declared:12,999,600   ✓
+
+✓ PASS                    bse/bse_zero_slash.txt                        Rows:  4 Free:  1 Locked:  3
+                          Computed:   5,262,792 Declared:5,262,792    ✓
+
+====================================================================================================
+SUMMARY: PASS=57, MISMATCH=0, FAIL=2, Total Distinctive Errors=3
+====================================================================================================

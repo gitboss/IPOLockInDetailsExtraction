@@ -16,13 +16,13 @@ class RowStatus(Enum):
 
 
 class LockBucket(Enum):
-    """Lock-in duration buckets (matches ScripUnlockDetails format)"""
-    YEARS_3_PLUS = "3_year"
-    YEARS_2_PLUS = "2_year"
-    YEARS_1_PLUS = "1_year"
-    ANCHOR_90_DAYS = "anchor_90"
-    ANCHOR_30_DAYS = "anchor_30"
-    FREE = "free"
+    """Lock-in duration buckets"""
+    YEARS_3_PLUS = "3+YEARS"
+    YEARS_2_PLUS = "2+YEARS"
+    YEARS_1_PLUS = "1+YEAR"
+    ANCHOR_90_DAYS = "ANCHOR_90DAYS"
+    ANCHOR_30_DAYS = "ANCHOR_30DAYS"
+    FREE = "FREE"
 
 
 @dataclass
@@ -70,6 +70,7 @@ class LockinData:
     computed_total: int = 0
     locked_total: int = 0
     free_total: int = 0
+    declared_total: Optional[int] = None  # From TOTAL line in PDF/TXT
 
     def compute_totals(self):
         """Calculate totals from rows"""
@@ -84,6 +85,7 @@ class LockinData:
             'computed_total': self.computed_total,
             'locked_total': self.locked_total,
             'free_total': self.free_total,
+            'declared_total': self.declared_total,
         }
 
 
@@ -120,6 +122,9 @@ class ValidationResult:
     message: str
     expected: Optional[int] = None
     actual: Optional[int] = None
+    can_override: bool = False  # Whether this rule can be manually overridden
+    overridden: bool = False  # Whether this rule has been overridden
+    override_reason: Optional[str] = None  # Reason for override
 
     def to_dict(self) -> dict:
         """Convert to dictionary"""
@@ -129,6 +134,9 @@ class ValidationResult:
             'message': self.message,
             'expected': self.expected,
             'actual': self.actual,
+            'can_override': self.can_override,
+            'overridden': self.overridden,
+            'override_reason': self.override_reason,
         }
 
 

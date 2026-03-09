@@ -31,27 +31,104 @@ def validate_rule1(lockin: LockinData) -> ValidationResult:
     )
 
 
-def validate_rule2(lockin: LockinData, declared_total: int) -> ValidationResult:
+def validate_rule2(
+    lockin: LockinData,
+    declared_total: int,
+    db_computed_total: int = None,
+    db_declared_total: int = None,
+    parsed_declared_total: int = None,
+    shp_total: int = None
+) -> ValidationResult:
     """
     RULE 2: Total Shares = Computed Shares (from declared total in master)
-    Lock-in PDF validation
+    Lock-in PDF validation with hints from DB and parsed data
+
+    Supports auto-override when:
+    - PDF has declared_total (from TOTAL line)
+    - declared_total == computed_total (RULE 1 passes)
+    - declared_total == SHP total (RULE 3 passes)
+    - Master table differs -> Use PDF value (auto-override)
+
+    Args:
+        lockin: Parsed lock-in data
+        declared_total: Declared total from sme_ipo_master
+        db_computed_total: Computed total from DB (hint)
+        db_declared_total: Declared total from DB (hint, may differ from master)
+        parsed_declared_total: Declared total extracted from PDF (hint)
+        shp_total: Total from SHP (for auto-override check)
     """
     expected = declared_total
     actual = lockin.computed_total
 
     passed = (expected == actual)
 
+    # Build hint information
+    hints = []
+
+    # Hint 1: Check if DB totals match (strong indicator of correctness)
+    if db_computed_total is not None and db_declared_total is not None:
+        db_match = (db_computed_total == db_declared_total)
+        if db_match:
+            hints.append(f"DB: computed={db_computed_total:,} == declared={db_declared_total:,} MATCH")
+        else:
+            hints.append(f"DB: computed={db_computed_total:,} != declared={db_declared_total:,}")
+
+    # Hint 2: Check if parsed declared matches parsed computed
+    if parsed_declared_total is not None:
+        parsed_match = (parsed_declared_total == actual)
+        if parsed_match:
+            hints.append(f"Parsed: declared={parsed_declared_total:,} == computed={actual:,} MATCH")
+        else:
+            hints.append(f"Parsed: declared={parsed_declared_total:,} != computed={actual:,}")
+
+    # Auto-override logic
+    can_override = False
+    auto_override = False
+    override_reason = None
+
+    if not passed and parsed_declared_total is not None:
+        # Check auto-override conditions:
+        # 1. PDF declared == computed (RULE 1 passes)
+        pdf_internally_consistent = (parsed_declared_total == actual)
+
+        # 2. PDF declared == SHP total (RULE 3 passes)
+        shp_matches = (shp_total is not None and parsed_declared_total == shp_total)
+
+        if pdf_internally_consistent and shp_matches:
+            # All checks pass - PDF is source of truth, master table is wrong
+            auto_override = True
+            override_reason = f"Auto-override: PDF internally consistent ({parsed_declared_total:,}) and matches SHP total. Master table ({expected:,}) should be updated."
+            passed = True  # Override the failure
+            can_override = True
+        elif pdf_internally_consistent or shp_matches:
+            # Partial match - allow manual override
+            can_override = True
+
+    # Build message
     message = (
-        f"Computed Total ({actual:,}) {'==' if passed else '!='} "
+        f"Computed Total ({actual:,}) {'==' if (expected == actual) else '!='} "
         f"Declared Total ({expected:,})"
     )
+
+    # Add hints if available
+    if hints:
+        message += f" | Hints: {'; '.join(hints)}"
+
+    # Add override info
+    if auto_override:
+        message += f" | AUTO-OVERRIDE: {override_reason}"
+    elif can_override and not passed:
+        message += " | CAN_OVERRIDE: PDF internally consistent, manual review recommended"
 
     return ValidationResult(
         rule_id="RULE2",
         passed=passed,
         message=message,
         expected=expected,
-        actual=actual
+        actual=actual,
+        can_override=can_override,
+        overridden=auto_override,
+        override_reason=override_reason
     )
 
 
@@ -176,7 +253,10 @@ def validate_all_rules(
     lockin: LockinData,
     shp: SHPData,
     declared_total: int,
-    anchor_letter_url: str = None
+    anchor_letter_url: str = None,
+    db_computed_total: int = None,
+    db_declared_total: int = None,
+    parsed_declared_total: int = None
 ) -> List[ValidationResult]:
     """
     Run all validation rules (RULE1-RULE6)
@@ -186,6 +266,9 @@ def validate_all_rules(
         shp: SHP extraction data
         declared_total: Declared total from sme_ipo_master
         anchor_letter_url: Anchor letter URL from sme_ipo_master
+        db_computed_total: Computed total from DB (hint for RULE2)
+        db_declared_total: Declared total from DB (hint for RULE2)
+        parsed_declared_total: Declared total extracted from PDF (hint for RULE2)
 
     Returns:
         List of ValidationResult for each rule
@@ -194,7 +277,14 @@ def validate_all_rules(
 
     # Lock-in PDF rules
     results.append(validate_rule1(lockin))
-    results.append(validate_rule2(lockin, declared_total))
+    results.append(validate_rule2(
+        lockin,
+        declared_total,
+        db_computed_total=db_computed_total,
+        db_declared_total=db_declared_total,
+        parsed_declared_total=parsed_declared_total,
+        shp_total=shp.total_shares if shp else None
+    ))
 
     # SHP PDF rules
     results.append(validate_rule5(shp))

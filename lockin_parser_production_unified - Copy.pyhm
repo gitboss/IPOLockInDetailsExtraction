@@ -52,6 +52,11 @@ def extract_table_rows(text: str) -> List[Dict]:
     for i, line in enumerate(lines):
         line = line.strip()
 
+        # Remove spaces within numbers (e.g., "1 234567" → "1234567")
+        # Uses lookahead to avoid consuming next digit, handles commas too
+        # TEMPORARILY COMMENTED OUT TO DEBUG
+        # line = re.sub(r'(\d)\s+(?=[\d,])', r'\1', line)
+
         # Skip empty lines and headers
         if not line or 'Distinctive' in line or 'Lock in' in line or 'Equity' in line:
             continue
@@ -302,156 +307,9 @@ def parse_lockin_table(text: str, listing_date: Optional[str] = None) -> Dict:
 # BSE-SPECIFIC LOCK-IN PARSER (from bse_lockin_comparison_next.py)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def parse_bse_strategy2_reverse_from_total(text: str) -> Optional[Dict]:
-    """
-    Strategy 2: Reverse from TOTAL line
+def parse_bse_text(text: str) -> Dict:
+    """Parse BSE lock-in text and extract row data."""
 
-    Works backwards from TOTAL line collecting data rows.
-    Best for files with:
-    - Variable column spacing (numbers close together)
-    - Missing dates on some rows
-    - TOTAL line at end
-
-    Example (SHREEREF format):
-        2430383      1           2430383      31-Jul-26
-        13675954     2430384     16106337     01-Aug-26
-        97,24,072    25906338    35630409     (NO DATE!)
-        35630409                              (TOTAL)
-
-    Algorithm:
-    1. Find TOTAL line (standalone number or "Total: NNN")
-    2. Go UP from TOTAL collecting data rows
-    3. Each row: extract 3+ numbers (shares, from, to)
-    4. Stop at headers or empty region
-    """
-    lines = text.split('\n')
-
-    # Find TOTAL line
-    total_value = None
-    total_line_idx = None
-
-    for idx, line in enumerate(lines):
-        line_stripped = line.strip()
-
-        # Skip empties and markers
-        if not line_stripped or line_stripped.startswith('---') or line_stripped.startswith('####'):
-            continue
-
-        # Check if this is a TOTAL line
-        if 'total' in line_stripped.lower():
-            nums = extract_numbers(line_stripped)
-            if nums:
-                total_value = max(nums)
-                total_line_idx = idx
-                break
-
-        # Check for standalone large number (potential TOTAL)
-        nums = extract_numbers(line_stripped)
-        if len(nums) == 1 and nums[0] > 1000000:  # Single large number
-            # Check next few lines - if they're empty/footer, this is likely TOTAL
-            next_lines = lines[idx+1:idx+4]
-            if all(not l.strip() or l.strip().startswith('#') or 'INTERNAL' in l for l in next_lines):
-                total_value = nums[0]
-                total_line_idx = idx
-                break
-
-    if total_value is None or total_line_idx is None:
-        return None  # Strategy failed
-
-    # Go UP from TOTAL collecting rows
-    rows = []
-    header_keywords = [
-        'Distinctive', 'Number of Securities', 'Lock in',
-        'Type of Security', 'Physical', 'Demat', 'From', 'To'
-    ]
-
-    for idx in range(total_line_idx - 1, -1, -1):
-        line = lines[idx].strip()
-
-        # Skip empties
-        if not line or line.startswith('---') or line.startswith('####'):
-            continue
-
-        # Stop at headers
-        if any(kw in line for kw in header_keywords):
-            break
-
-        # Stop at company name / title lines (usually at top)
-        if 'Limited' in line and len(extract_numbers(line)) == 0:
-            break
-
-        # Extract numbers
-        nums = extract_numbers(line)
-
-        # Need at least 3 numbers for a valid row (shares, from, to)
-        if len(nums) < 3:
-            continue
-
-        # Extract shares, from, to
-        shares = nums[0]
-        from_num = nums[1]
-        to_num = nums[2]
-
-        # Extract date if present
-        date_pattern = r'(\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4})'
-        dates_found = re.findall(date_pattern, line, re.IGNORECASE)
-
-        lockin_date = dates_found[0] if dates_found else None
-
-        # Check for "Free" keywords in line
-        free_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|NA)'
-        free_match = re.search(free_pattern, line, re.IGNORECASE)
-
-        # Use classify_row to determine if free or locked
-        raw_lockin = lockin_date if lockin_date else (free_match.group(0) if free_match else '')
-        row_class = classify_row('', raw_lockin)  # type_security not available in this format
-        is_free = (row_class == 'free')
-
-        rows.append({
-            'shares': shares,
-            'from': from_num,
-            'to': to_num,
-            'lockin_date': lockin_date,
-            'is_free': is_free,
-            'raw_lockin': raw_lockin,
-            'row_class': row_class,
-        })
-
-    # Reverse to get top-to-bottom order
-    rows.reverse()
-
-    if not rows:
-        return None  # Strategy failed
-
-    # Compute totals
-    computed_total = sum(r['shares'] for r in rows)
-
-    # Validate: computed should match declared TOTAL
-    # Allow small tolerance for rounding
-    if abs(computed_total - total_value) > 100:
-        return None  # Mismatch too large, strategy failed
-
-    return {
-        'rows': rows,
-        'declared_total': total_value,
-        'computed_total': computed_total,
-        'total_match': (computed_total == total_value),
-        'rows_count': len(rows),
-        'free_count': sum(1 for r in rows if r.get('is_free')),
-        'locked_count': sum(1 for r in rows if not r.get('is_free')),
-        'free_shares': sum(r['shares'] for r in rows if r.get('is_free')),
-        'locked_shares': sum(r['shares'] for r in rows if not r.get('is_free')),
-        'strategy': 'reverse_from_total',
-    }
-
-
-def parse_bse_strategy1_line_by_line(text: str) -> Dict:
-    """
-    Strategy 1: Line-by-line parsing (original BSE parser)
-
-    Processes each line sequentially extracting numbers and dates.
-    Works for well-formatted tables with clear column boundaries.
-    """
     result = {
         'rows': [],
         'declared_total': None,
@@ -476,17 +334,6 @@ def parse_bse_strategy1_line_by_line(text: str) -> Dict:
 
     for line in lines:
         line = line.strip()
-
-        # Remove spaces within malformed numbers (BSE files have spaces in unexpected places)
-        # CRITICAL: Only match EXACTLY 1 space (malformed), NOT 2+ spaces (column boundary)
-        # Pattern 1: "9 7,84,937" → "97,84,937" (exactly 1 space before digits+comma)
-        # Pattern 2: "3 ,03,091" → "3,03,091" (exactly 1 space before comma)
-        # Pattern 3: "1 9.00" → "19.00" (exactly 1 space before digits+decimal)
-        # Pattern 4: "7 .00" → "7.00" (exactly 1 space before decimal)
-        line = re.sub(r'(\d) (\d{1,2},)', r'\1\2', line)   # digit + 1 space + 1-2 digits + comma
-        line = re.sub(r'(\d) (,)', r'\1\2', line)           # digit + 1 space + comma
-        line = re.sub(r'(\d) (\d{1,2}\.)', r'\1\2', line)  # digit + 1 space + 1-2 digits + decimal
-        line = re.sub(r'(\d) (\.)', r'\1\2', line)          # digit + 1 space + decimal
 
         # Skip empty lines, headers, page markers
         if not line or line.startswith('---') or line.startswith('####'):
@@ -622,26 +469,4 @@ def parse_bse_strategy1_line_by_line(text: str) -> Dict:
     if result['declared_total'] is None and result['computed_total'] > 0:
         result['declared_total'] = result['computed_total']
 
-    result['strategy'] = 'line_by_line'
-    return result
-
-
-def parse_bse_text(text: str) -> Dict:
-    """
-    Parse BSE lock-in text using CASCADE of strategies
-
-    Strategies (in order):
-    1. Strategy 2: Reverse from TOTAL - handles variable spacing, missing dates
-    2. Strategy 1: Line-by-line - original parser for well-formatted tables
-
-    Returns:
-        Dict with rows, totals, and 'strategy' field indicating which worked
-    """
-    # Try Strategy 2 first (handles SHREEREF-style files)
-    result = parse_bse_strategy2_reverse_from_total(text)
-    if result is not None and len(result.get('rows', [])) > 0:
-        return result
-
-    # Fallback to Strategy 1 (original parser)
-    result = parse_bse_strategy1_line_by_line(text)
     return result

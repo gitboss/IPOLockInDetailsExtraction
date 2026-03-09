@@ -46,6 +46,7 @@ from config import BASE_DIR, DOWNLOADS_DIR, FINALIZED_DIR, EXCHANGES, PDF_LAYOUT
 import db
 from parser_lockin import parse_lockin_file
 from parser_shp import parse_shp_file
+from text_utils import is_blank_text_file, get_blank_file_stats
 from validator import validate_all_rules
 from database import get_master_data, save_processing_log, update_processing_log_error
 from models import ProcessingStatus
@@ -111,6 +112,7 @@ class IPOProcessor:
         # Step 2: Validation results
         self.validations = []
         self.all_rules_passed = False
+        self.blank_shp_error = None  # Set if SHP file is blank
 
     def print_header(self):
         """Print formatted header"""
@@ -508,6 +510,28 @@ class IPOProcessor:
         step_num += 1
 
         if not self.dry_run:
+            # First check if SHP file is blank (just page markers, no actual content)
+            try:
+                with open(self.shp_java_txt, 'r', encoding='utf-8') as f:
+                    shp_text = f.read()
+
+                if is_blank_text_file(shp_text):
+                    stats = get_blank_file_stats(shp_text)
+                    error_msg = f"Blank SHP file detected ({stats['page_count']} pages, {stats['actual_content_chars']} chars of actual content)"
+                    self.log_step(step_num, "⚠️", error_msg)
+                    print(f"\n⚠️  {error_msg}")
+                    print("   File contains only page markers and separators with no meaningful data")
+                    print("   Finalization will be skipped")
+
+                    # Set shp_data to None and store error for finalization
+                    self.shp_data = None
+                    self.blank_shp_error = error_msg
+                    step_num += 1
+                    return step_num
+            except Exception as e:
+                print(f"\n⚠️  Warning: Could not check if SHP file is blank: {e}")
+                # Continue with parsing attempt
+
             try:
                 # DUAL-HINT STRATEGY: Pass BOTH declared total (from DB) and computed total (from PDF)
                 # Priority: computed_total (most reliable) → declared_total (may have inaccuracies) → largest number
@@ -538,6 +562,14 @@ class IPOProcessor:
         step_num += 1
 
         if not self.dry_run:
+            # Skip validation if SHP is blank
+            if self.blank_shp_error:
+                self.log_step(step_num, "⊗", "Validation skipped (blank SHP file)")
+                self.validations = []
+                self.all_rules_passed = False
+                step_num += 1
+                return step_num
+
             # Run validations
             if not self.declared_total:
                 print("\n⚠️  Warning: No declared_total from master, RULE2 will be skipped")
@@ -548,7 +580,8 @@ class IPOProcessor:
                 self.lockin_data,
                 self.shp_data,
                 self.declared_total,
-                self.anchor_letter_url
+                self.anchor_letter_url,
+                parsed_declared_total=self.lockin_data.declared_total if self.lockin_data else None
             )
 
             # Check results
@@ -612,6 +645,14 @@ class IPOProcessor:
 
     def finalize_processing(self, step_num: int) -> int:
         """Finalize files by moving to finalized/ folders"""
+        # Check for blank SHP file first
+        if self.blank_shp_error:
+            skip_reason = f"Finalization skipped: {self.blank_shp_error}"
+            self.log_step(step_num, "⊗", skip_reason)
+            if not self.no_db and self.processing_log_id:
+                update_processing_log_error(self.processing_log_id, skip_reason)
+            return step_num + 1
+
         # Check if can finalize
         can_finalize, reason = check_can_finalize(
             self.all_rules_passed,
