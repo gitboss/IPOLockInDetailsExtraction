@@ -575,70 +575,147 @@ def extract_shp_using_boundary_detection(
     annexure_total: Optional[int] = None,
     lockin_locked_hint: Optional[int] = None
 ) -> Optional[Dict]:
-    """Scan UP from Total until boundary to find data rows."""
+    """
+    Strategy 5: Boundary-detection position-based extraction.
+    Goes UP from Total row until hitting data section boundary.
+
+    Algorithm:
+    1. Find Total row containing annexure_total
+    2. Go UP line by line from Total
+    3. Check if line is data: 3+ numbers AND (>10,000 OR max ≤100)
+    4. If data: collect it, reset consecutive_non_data counter
+    5. If non-data: increment consecutive_non_data
+    6. Stop if consecutive_non_data >= 3 (hit boundary)
+    7. Extract values from same column position as annexure_total
+    """
+    if not annexure_total:
+        return None
+
     lines = text.splitlines()
-    total_line_idx = None
+
+    # Step 1: Find Total row containing annexure_total
+    total_row_idx = None
+    total_line = None
 
     for i, line in enumerate(lines):
-        s = line.strip()
-        if not s:
-            continue
-        low = s.lower()
-        if not re.match(r'^total\b', low):
-            continue
-        if "shareholding of promoters" in low or "public shareholding" in low:
-            continue
-        if len(extract_numbers(s)) >= 2:
-            total_line_idx = i
+        nums = extract_numbers(line)
+        if annexure_total in nums:
+            total_row_idx = i
+            total_line = line
             break
 
-    if total_line_idx is None or total_line_idx < 3:
+    if total_row_idx is None:
         return None
 
-    data_lines = []
-    for i in range(total_line_idx - 1, max(0, total_line_idx - 10), -1):
-        line = lines[i].strip()
-        if not line:
+    # Step 2: Go UP from Total, collecting data rows until boundary
+    data_rows = []
+    consecutive_non_data = 0
+    max_rows = 10  # Safety limit
+    boundary_threshold = 3  # Stop after N consecutive non-data lines
+
+    for i in range(total_row_idx - 1, -1, -1):
+        line = lines[i]
+
+        if not line.strip():
+            consecutive_non_data += 1
+            if consecutive_non_data >= boundary_threshold:
+                break
             continue
-        if re.match(r'^total\b', line.lower()):
+
+        nums = extract_numbers(line)
+
+        # Data row detection criteria
+        has_enough_numbers = len(nums) >= 3
+
+        if has_enough_numbers:
+            # Check if row contains share data (not dates or metadata)
+            has_share_count = any(n > 10000 for n in nums)
+            is_zero_row = max(nums) <= 100 if nums else False
+
+            if has_share_count or is_zero_row:
+                # This is likely a data row
+                data_rows.append({
+                    'index': i,
+                    'line': line.strip(),
+                    'numbers': nums
+                })
+                consecutive_non_data = 0  # Reset counter
+            else:
+                # Has numbers but not share data pattern
+                consecutive_non_data += 1
+                if consecutive_non_data >= boundary_threshold:
+                    break
+        else:
+            # Has <3 numbers (likely header or separator)
+            consecutive_non_data += 1
+            if consecutive_non_data >= boundary_threshold:
+                break
+
+        if len(data_rows) >= max_rows:
+            break  # Safety limit
+
+    # Reverse to get top-to-bottom order
+    data_rows.reverse()
+
+    if len(data_rows) < 2:
+        return None
+
+    # Step 3: Find share position in Total row
+    total_nums = extract_numbers(total_line)
+    share_position = None
+
+    for i, num in enumerate(total_nums):
+        if num == annexure_total:
+            share_position = i
             break
-        if extract_numbers(line):
-            data_lines.append(line)
 
-    data_lines.reverse()
-
-    if len(data_lines) < 3:
+    if share_position is None:
         return None
 
-    total_nums, share_col_idx, locked_col_idx, detected_total = detect_total_row_columns(
-        lines[total_line_idx], annexure_total
-    )
-    if share_col_idx is None:
+    # Step 4: Extract from same position in data rows
+    # Row 0 = Promoter, Row 1 = Public, Row 2+ = Other (if exists)
+    promoter_row = data_rows[0]
+    promoter_nums = promoter_row['numbers']
+    promoter = promoter_nums[share_position] if share_position < len(promoter_nums) else None
+
+    public_row = data_rows[1]
+    public_nums = public_row['numbers']
+    public = public_nums[share_position] if share_position < len(public_nums) else None
+
+    # Handle Other (optional)
+    other = None
+    if len(data_rows) >= 3:
+        other_row = data_rows[2]
+        other_nums = other_row['numbers']
+        other = other_nums[share_position] if share_position < len(other_nums) else None
+    else:
+        other = 0
+
+    if promoter is None or public is None:
         return None
 
-    promoter = pick_value_from_column(data_lines[0], share_col_idx, annexure_total)
-    public = pick_value_from_column(data_lines[1], share_col_idx, annexure_total)
-    other = pick_value_from_column(data_lines[2], share_col_idx, annexure_total)
+    # Validate math
+    calculated_total = promoter + public + (other or 0)
 
+    # Extract locked using lockin_locked_hint
     locked = None
-    if locked_col_idx is not None:
-        nums = extract_numbers(lines[total_line_idx])
-        if locked_col_idx < len(nums):
-            locked = nums[locked_col_idx]
-
-    all_found = promoter is not None and public is not None and other is not None
-    maths_verified = False
-    if all_found and annexure_total:
-        maths_verified = (promoter + public + other) == annexure_total
+    if lockin_locked_hint and lockin_locked_hint in total_nums:
+        locked_idx = total_nums.index(lockin_locked_hint)
+        locked = total_nums[locked_idx]
+    else:
+        for i in range(share_position + 1, len(total_nums)):
+            if 0 < total_nums[i] < annexure_total:
+                locked = total_nums[i]
+                break
 
     return {
         "promoter_shares": promoter,
         "public_shares": public,
-        "other_shares": other,
-        "total_shares": detected_total or annexure_total,
+        "other_shares": other or 0,
+        "total_shares": annexure_total,
         "shp_locked_total": locked,
-        "total_verified": maths_verified,
-        "maths_verified": maths_verified,
+        "total_verified": (calculated_total == annexure_total),
+        "maths_verified": (calculated_total == annexure_total),
     }
 
 
@@ -997,14 +1074,17 @@ def validate_shp_result(shp_data: dict, lockin_locked_sum: int = None) -> Tuple[
 
 if __name__ == "__main__":
     import sys
-    
+
     if len(sys.argv) < 2:
-        print("Usage: python shp_parser_unified.py <text_file>")
+        print("Usage: python shp_parser_unified.py <text_file> [known_total] [known_locked]")
         sys.exit(1)
-    
+
     text_file = sys.argv[1]
+    known_total = int(sys.argv[2]) if len(sys.argv) >= 3 else None
+    known_locked = int(sys.argv[3]) if len(sys.argv) >= 4 else None
+
     with open(text_file, 'r', encoding='utf-8') as f:
         text = f.read()
-    
-    result = parse_shp_text(text)
+
+    result = parse_shp_text(text, known_total, known_locked)
     print(result)

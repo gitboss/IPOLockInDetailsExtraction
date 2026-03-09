@@ -11,7 +11,7 @@ Copied from:
 
 import re
 from typing import Dict, List, Optional
-from shared_parsing import parse_date_str, classify_row, clean_num, norm
+from shared_parsing import parse_date_str, classify_row, clean_num, norm, extract_dates_from_line
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -302,86 +302,98 @@ def parse_lockin_table(text: str, listing_date: Optional[str] = None) -> Dict:
 # BSE-SPECIFIC LOCK-IN PARSER (from bse_lockin_comparison_next.py)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def parse_bse_strategy2_reverse_from_total(text: str) -> Optional[Dict]:
+def parse_bse_strategy2_reverse_from_total(text: str, known_total: Optional[int] = None) -> Optional[Dict]:
     """
-    Strategy 2: Reverse from TOTAL line
+    Strategy 2: Total Validation (Reverse from Bottom)
 
-    Works backwards from TOTAL line collecting data rows.
-    Best for files with:
-    - Variable column spacing (numbers close together)
-    - Missing dates on some rows
-    - TOTAL line at end
-
-    Example (SHREEREF format):
-        2430383      1           2430383      31-Jul-26
-        13675954     2430384     16106337     01-Aug-26
-        97,24,072    25906338    35630409     (NO DATE!)
-        35630409                              (TOTAL)
+    Two modes:
+    1. WITH known_total (from DB): Math-based validation - most robust
+    2. WITHOUT known_total: Find TOTAL line in text, validate against it
 
     Algorithm:
-    1. Find TOTAL line (standalone number or "Total: NNN")
-    2. Go UP from TOTAL collecting data rows
-    3. Each row: extract 3+ numbers (shares, from, to)
-    4. Stop at headers or empty region
+    - Start from BOTTOM (or TOTAL line), go UP collecting rows
+    - Keep running sum of shares
+    - Stop when running_sum == target_total
+    - Validate distinctive number math: shares == (to - from + 1)
+    - Double confirmation: last row's to_num == target_total
+
+    NO HARD-CODED FOOTER KEYWORDS - uses math only
+
+    Args:
+        text: Raw BSE lock-in text
+        known_total: Known total from database (optional)
+
+    Returns:
+        Parsed result dict, or None if strategy fails
     """
     lines = text.split('\n')
-
-    # Find TOTAL line
-    total_value = None
-    total_line_idx = None
-
-    for idx, line in enumerate(lines):
-        line_stripped = line.strip()
-
-        # Skip empties and markers
-        if not line_stripped or line_stripped.startswith('---') or line_stripped.startswith('####'):
-            continue
-
-        # Check if this is a TOTAL line
-        if 'total' in line_stripped.lower():
-            nums = extract_numbers(line_stripped)
-            if nums:
-                total_value = max(nums)
-                total_line_idx = idx
-                break
-
-        # Check for standalone large number (potential TOTAL)
-        nums = extract_numbers(line_stripped)
-        if len(nums) == 1 and nums[0] > 1000000:  # Single large number
-            # Check next few lines - if they're empty/footer, this is likely TOTAL
-            next_lines = lines[idx+1:idx+4]
-            if all(not l.strip() or l.strip().startswith('#') or 'INTERNAL' in l for l in next_lines):
-                total_value = nums[0]
-                total_line_idx = idx
-                break
-
-    if total_value is None or total_line_idx is None:
-        return None  # Strategy failed
-
-    # Go UP from TOTAL collecting rows
     rows = []
-    header_keywords = [
-        'Distinctive', 'Number of Securities', 'Lock in',
-        'Type of Security', 'Physical', 'Demat', 'From', 'To'
-    ]
+    running_sum = 0
+    target_total = known_total
+    # Minimal header keywords - avoid words that appear in footers
+    header_keywords = ['Number of Securities', 'Type of Security']
 
-    for idx in range(total_line_idx - 1, -1, -1):
+    # ALWAYS find TOTAL line in text (even if known_total provided)
+    # This tells us where to START parsing from (avoid footer junk)
+    start_idx = None
+    found_total = None
+    for idx in range(len(lines) - 1, -1, -1):
         line = lines[idx].strip()
-
-        # Skip empties
         if not line or line.startswith('---') or line.startswith('####'):
             continue
 
-        # Stop at headers
-        if any(kw in line for kw in header_keywords):
+        # Look for standalone large number (TOTAL)
+        nums = extract_numbers(line)
+        if len(nums) == 1 and nums[0] > 1000000:
+            found_total = nums[0]
+            start_idx = idx - 1
             break
 
-        # Stop at company name / title lines (usually at top)
-        if 'Limited' in line and len(extract_numbers(line)) == 0:
-            break
+        # Or line with "total" keyword
+        if 'total' in line.lower():
+            nums = extract_numbers(line)
+            if nums:
+                found_total = max(nums)
+                start_idx = idx - 1
+                break
+
+    if start_idx is None:
+        return None  # No TOTAL found
+
+    # Use known_total if provided, otherwise use found_total
+    if not target_total:
+        target_total = found_total
+
+    # Go UP from start position
+    for idx in range(start_idx, -1, -1):
+        line = lines[idx].strip()
+
+        # Skip empties and markers
+        if not line or line.startswith('---') or line.startswith('####'):
+            continue
+
+        # Remove spaces within malformed numbers (same as Strategy 1)
+        # Pattern 0: "4 47  " → "447  " (exactly 1 space + 1-2 digits + 2+ spaces/end) - ICODEX case
+        # Pattern 1: "9 7,84,937" → "97,84,937" (exactly 1 space before digits+comma)
+        # Pattern 2: "3 ,03,091" → "3,03,091" (exactly 1 space before comma)
+        # Pattern 3: "1 9.00" → "19.00" (exactly 1 space before digits+decimal)
+        # Pattern 4: "7 .00" → "7.00" (exactly 1 space before decimal)
+        line = re.sub(r'(\d) (\d{1,2})(?=\s{2,}|$)', r'\1\2', line)  # digit + 1 space + 1-2 digits + 2+ spaces/end
+        line = re.sub(r'(\d) (\d{1,2},)', r'\1\2', line)   # digit + 1 space + 1-2 digits + comma
+        line = re.sub(r'(\d) (,)', r'\1\2', line)           # digit + 1 space + comma
+        line = re.sub(r'(\d) (\d{1,2}\.)', r'\1\2', line)  # digit + 1 space + 1-2 digits + decimal
+        line = re.sub(r'(\d) (\.)', r'\1\2', line)          # digit + 1 space + decimal
 
         # Extract numbers
         nums = extract_numbers(line)
+
+        # Stop at headers (only if line has < 3 numbers, otherwise it's a data row)
+        if len(nums) < 3 and any(kw in line for kw in header_keywords):
+            break
+
+        # Stop at company name / title lines
+        if 'Limited' in line and len(nums) == 0:
+            break
 
         # Need at least 3 numbers for a valid row (shares, from, to)
         if len(nums) < 3:
@@ -392,56 +404,69 @@ def parse_bse_strategy2_reverse_from_total(text: str) -> Optional[Dict]:
         from_num = nums[1]
         to_num = nums[2]
 
-        # Extract date if present
-        date_pattern = r'(\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4})'
-        dates_found = re.findall(date_pattern, line, re.IGNORECASE)
+        # Validate distinctive number math
+        if from_num > 0 and to_num > 0:
+            expected_shares = to_num - from_num + 1
+            if shares != expected_shares:
+                # Malformed row - skip it
+                continue
 
-        lockin_date = dates_found[0] if dates_found else None
+        # Check if adding this row would exceed target total
+        new_sum = running_sum + shares
 
-        # Check for "Free" keywords in line
-        free_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|NA)'
-        free_match = re.search(free_pattern, line, re.IGNORECASE)
+        if new_sum > target_total:
+            break  # Stop - we've collected all data rows
 
-        # Use classify_row to determine if free or locked
-        raw_lockin = lockin_date if lockin_date else (free_match.group(0) if free_match else '')
-        row_class = classify_row('', raw_lockin)  # type_security not available in this format
+        # Extract dates using shared function (same as Strategy 1)
+        date_info = extract_dates_from_line(line)
+        from_date = date_info['from_date']
+        to_date = date_info['to_date']
+
+        # Use to_date as primary lockin_date (same as Strategy 1)
+        raw_lockin = to_date if to_date else from_date
+        row_class = classify_row('', raw_lockin)
         is_free = (row_class == 'free')
 
         rows.append({
             'shares': shares,
             'from': from_num,
             'to': to_num,
-            'lockin_date': lockin_date,
+            'from_date': from_date,
+            'to_date': to_date,
             'is_free': is_free,
             'raw_lockin': raw_lockin,
             'row_class': row_class,
         })
 
+        running_sum = new_sum
+
+        # Stop if we've reached exact total
+        if running_sum == target_total:
+            if to_num == target_total:  # Double confirmation
+                break
+
     # Reverse to get top-to-bottom order
     rows.reverse()
 
     if not rows:
-        return None  # Strategy failed
+        return None
 
-    # Compute totals
+    # Validate: computed total should match target
     computed_total = sum(r['shares'] for r in rows)
-
-    # Validate: computed should match declared TOTAL
-    # Allow small tolerance for rounding
-    if abs(computed_total - total_value) > 100:
-        return None  # Mismatch too large, strategy failed
+    if computed_total != target_total:
+        return None  # Mismatch
 
     return {
         'rows': rows,
-        'declared_total': total_value,
+        'declared_total': target_total,
         'computed_total': computed_total,
-        'total_match': (computed_total == total_value),
+        'total_match': True,
         'rows_count': len(rows),
         'free_count': sum(1 for r in rows if r.get('is_free')),
         'locked_count': sum(1 for r in rows if not r.get('is_free')),
         'free_shares': sum(r['shares'] for r in rows if r.get('is_free')),
         'locked_shares': sum(r['shares'] for r in rows if not r.get('is_free')),
-        'strategy': 'reverse_from_total',
+        'strategy': 'total_validation' if known_total else 'reverse_from_total',
     }
 
 
@@ -479,10 +504,12 @@ def parse_bse_strategy1_line_by_line(text: str) -> Dict:
 
         # Remove spaces within malformed numbers (BSE files have spaces in unexpected places)
         # CRITICAL: Only match EXACTLY 1 space (malformed), NOT 2+ spaces (column boundary)
+        # Pattern 0: "4 47  " → "447  " (exactly 1 space + 1-2 digits + 2+ spaces/end) - ICODEX case
         # Pattern 1: "9 7,84,937" → "97,84,937" (exactly 1 space before digits+comma)
         # Pattern 2: "3 ,03,091" → "3,03,091" (exactly 1 space before comma)
         # Pattern 3: "1 9.00" → "19.00" (exactly 1 space before digits+decimal)
         # Pattern 4: "7 .00" → "7.00" (exactly 1 space before decimal)
+        line = re.sub(r'(\d) (\d{1,2})(?=\s{2,}|$)', r'\1\2', line)  # digit + 1 space + 1-2 digits + 2+ spaces/end
         line = re.sub(r'(\d) (\d{1,2},)', r'\1\2', line)   # digit + 1 space + 1-2 digits + comma
         line = re.sub(r'(\d) (,)', r'\1\2', line)           # digit + 1 space + comma
         line = re.sub(r'(\d) (\d{1,2}\.)', r'\1\2', line)  # digit + 1 space + 1-2 digits + decimal
@@ -539,6 +566,13 @@ def parse_bse_strategy1_line_by_line(text: str) -> Dict:
         shares = nums[0]
         from_num = nums[1] if len(nums) > 1 else 0
         to_num = nums[2] if len(nums) > 2 else 0
+
+        # Validate distinctive number math (reject malformed rows like addresses)
+        if from_num > 0 and to_num > 0:
+            expected_shares = to_num - from_num + 1
+            if shares != expected_shares:
+                # Skip malformed rows (e.g., address lines parsed as data)
+                continue
 
         # Extract dates - handle multiple formats
         # Common BSE formats: DD/MM/YYYY, DD-Mon-YYYY, DD-MM-YYYY, Month DD, YYYY, DDth Month YYYY, FREE, N/A, Free IPO Shares
@@ -626,22 +660,26 @@ def parse_bse_strategy1_line_by_line(text: str) -> Dict:
     return result
 
 
-def parse_bse_text(text: str) -> Dict:
+def parse_bse_text(text: str, known_total: Optional[int] = None) -> Dict:
     """
     Parse BSE lock-in text using CASCADE of strategies
 
     Strategies (in order):
-    1. Strategy 2: Reverse from TOTAL - handles variable spacing, missing dates
-    2. Strategy 1: Line-by-line - original parser for well-formatted tables
+    1. Strategy 2: Total Validation (uses known_total if provided, or finds TOTAL in text)
+    2. Strategy 1: Line-by-line (original parser, fallback)
+
+    Args:
+        text: Raw BSE lock-in text
+        known_total: Known total from database (optional, makes Strategy 2 more robust)
 
     Returns:
         Dict with rows, totals, and 'strategy' field indicating which worked
     """
-    # Try Strategy 2 first (handles SHREEREF-style files)
-    result = parse_bse_strategy2_reverse_from_total(text)
+    # Try Strategy 2 first (works with or without known_total)
+    result = parse_bse_strategy2_reverse_from_total(text, known_total)
     if result is not None and len(result.get('rows', [])) > 0:
         return result
 
-    # Fallback to Strategy 1 (original parser)
+    # Fallback to Strategy 1
     result = parse_bse_strategy1_line_by_line(text)
     return result

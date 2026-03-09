@@ -455,17 +455,10 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> 
             to_date = parse_date(date_str)
 
         # Determine row status
-        # Check if lock-in has expired (to_date is in the past)
-        from datetime import date as date_type
-        today = date_type.today()
-
-        if to_date and to_date < today:
-            # Lock-in expired → FREE
-            row_status = RowStatus.FREE
-        else:
-            # Use raw parser's classification
-            is_free = row_dict.get('is_free', False)
-            row_status = RowStatus.FREE if is_free else RowStatus.LOCKED
+        # Use raw parser's classification (date expiration is NOT checked)
+        # Business rule: If there's a lock-in date, shares are LOCKED regardless of past/present
+        is_free = row_dict.get('is_free', False)
+        row_status = RowStatus.FREE if is_free else RowStatus.LOCKED
 
         # Calculate bucket
         bucket = calculate_bucket(allotment_date, from_date, to_date) if allotment_date else LockBucket.FREE

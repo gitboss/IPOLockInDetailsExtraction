@@ -129,6 +129,8 @@ def is_free_date(d):
         return True
     if "free" in d:
         return True
+    if "ipo" in d and "shares" in d:  # "IPO Shares" indicates free shares
+        return True
     if re.match(r'n\.?a\.?', d):
         return True
     return False
@@ -177,6 +179,49 @@ def classify_row(type_security: str, raw_lockin: str) -> str:
     if d and not is_free_date(d):
         return "locked"
     return "free"
+
+
+def extract_dates_from_line(line: str):
+    """
+    Extract lock-in dates from a line of text.
+    Shared by ALL BSE parsing strategies.
+
+    Handles formats:
+    - DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
+    - DD-Mon-YYYY (e.g., 09-Dec-25)
+    - Month DD, YYYY
+    - DDth Month YYYY
+    - Free IPO Shares, IPO Shares, FREE, N/A
+
+    Args:
+        line: Text line to extract dates from
+
+    Returns:
+        Dict with 'from_date_raw', 'to_date_raw', 'from_date', 'to_date'
+    """
+    # Comprehensive date pattern (same for ALL strategies)
+    date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|IPO\s+Shares?|FREE|N/?A|NA|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
+    dates_found = re.findall(date_pattern, line, re.IGNORECASE)
+
+    from_date_raw = ''
+    to_date_raw = ''
+
+    if len(dates_found) >= 2:
+        from_date_raw = dates_found[0]
+        to_date_raw = dates_found[1]
+    elif len(dates_found) == 1:
+        to_date_raw = dates_found[0]
+
+    # Parse dates using parse_date_str
+    from_date = parse_date_str(from_date_raw) if from_date_raw else ''
+    to_date = parse_date_str(to_date_raw) if to_date_raw else ''
+
+    return {
+        'from_date_raw': from_date_raw,
+        'to_date_raw': to_date_raw,
+        'from_date': from_date,
+        'to_date': to_date,
+    }
 
 
 # ============================================================================
