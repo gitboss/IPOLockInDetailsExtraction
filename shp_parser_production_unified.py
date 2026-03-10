@@ -1018,8 +1018,9 @@ def extract_shp_using_simple_position(
 
 def extract_shp_using_boundary_detection(
     text: str,
-    known_total: int,
-    known_locked: Optional[int] = None
+    annexure_total: Optional[int],      # DB total - ORIGINAL (try first)
+    lockin_locked_hint: Optional[int] = None,
+    total_hint_computed: Optional[int] = None  # [FALLBACK 2026-03-09] Computed total - safe to remove if issues
 ) -> Optional[Dict]:
     """
     Strategy 6: Boundary-detection position-based extraction.
@@ -1028,10 +1029,13 @@ def extract_shp_using_boundary_detection(
     More elegant than Strategy 5 - detects boundaries dynamically instead of fixed window.
 
     Algorithm:
-    1. Find Total row containing known_total
-    2. Go UP line by line from Total
-    3. Check if line is data: 3+ numbers AND (>10,000 OR max ≤100)
-    4. If data: collect it, reset consecutive_non_data counter
+    1. Find Total row containing annexure_total (DB total - try first)
+    2. If not found, try total_hint_computed (computed total - fallback) [2026-03-09]
+    3. Go UP line by line from Total
+    4. Check if line is data: 3+ numbers AND (>10,000 OR max ≤100)
+    5. If data: collect it, reset consecutive_non_data counter
+    
+    [FALLBACK 2026-03-09] If you need to rollback: remove total_hint_computed parameter and fallback loop
     5. If non-data: increment consecutive_non_data
     6. Stop if consecutive_non_data >= 3 (hit boundary - headers/dates section)
     7. Extract values from same column position as known_total
@@ -1080,27 +1084,45 @@ def extract_shp_using_boundary_detection(
 
     Args:
         text: SHP text content
-        known_total: Known total shares (required)
-        known_locked: Known locked shares (optional)
+        annexure_total: DB total shares (try first - original)
+        lockin_locked_hint: Known locked shares (optional)
+        total_hint_computed: Computed total shares (fallback) [2026-03-09]
 
     Returns:
         Dict with extracted values or None if extraction fails
+        
+    [FALLBACK 2026-03-09] Rollback: Remove total_hint_computed param and fallback loop below
     """
-    if not known_total:
+    # [FALLBACK 2026-03-09] Need at least one hint
+    if not annexure_total and not total_hint_computed:
         return None
 
     lines = text.splitlines()
 
-    # Step 1: Find Total row containing known_total
+    # Step 1: Find Total row
+    # ORIGINAL: Try annexure_total (DB total) first
     total_row_idx = None
     total_line = None
+    found_total = None  # Track which total was actually found [FALLBACK 2026-03-09]
 
-    for i, line in enumerate(lines):
-        nums = extract_numbers(line)
-        if known_total in nums:
-            total_row_idx = i
-            total_line = line
-            break
+    if annexure_total:
+        for i, line in enumerate(lines):
+            nums = extract_numbers(line)
+            if annexure_total in nums:
+                total_row_idx = i
+                total_line = line
+                found_total = annexure_total  # [FALLBACK 2026-03-09]
+                break
+
+    # [FALLBACK 2026-03-09] If annexure_total not found, try total_hint_computed
+    if total_row_idx is None and total_hint_computed:
+        for i, line in enumerate(lines):
+            nums = extract_numbers(line)
+            if total_hint_computed in nums:
+                total_row_idx = i
+                total_line = line
+                found_total = total_hint_computed  # [FALLBACK 2026-03-09]
+                break
 
     if total_row_idx is None:
         return None
@@ -1182,8 +1204,9 @@ def extract_shp_using_boundary_detection(
     total_nums = extract_numbers(total_line)
     share_position = None
 
+    # [FALLBACK 2026-03-09] Use found_total (could be annexure_total or total_hint_computed)
     for i, num in enumerate(total_nums):
-        if num == known_total:
+        if num == found_total:
             share_position = i
             break
 
@@ -1215,7 +1238,7 @@ def extract_shp_using_boundary_detection(
 
     # Step 5: Validation
     calc_sum = promoter + public + (other or 0)
-    sum_valid = (calc_sum == known_total)
+    sum_valid = (calc_sum == found_total)  # [FALLBACK 2026-03-09]
 
     if not sum_valid:
         return None
@@ -1223,15 +1246,16 @@ def extract_shp_using_boundary_detection(
     # Extract locked value from Total row
     locked = None
     locked_verified = False
-    if known_locked and known_locked in total_nums:
-        locked = known_locked
+    # [FALLBACK 2026-03-09] Use lockin_locked_hint (parameter name)
+    if lockin_locked_hint and lockin_locked_hint in total_nums:
+        locked = lockin_locked_hint
         locked_verified = True
 
     result = {
         "promoter_shares": promoter,
         "public_shares": public,
         "other_shares": other,
-        "total_shares": known_total,
+        "total_shares": found_total,  # [FALLBACK 2026-03-09] Use found_total
         "total_verified": True,
         "shp_locked_total": locked,
         "shp_locked_verified": locked_verified,
@@ -1598,7 +1622,12 @@ def extract_shp_using_position_from_total(
     return result
 
 
-def extract_shp_values_from_text_java(text: str, annexure_total: Optional[int] = None, lockin_locked_hint: Optional[int] = None) -> Dict:
+def extract_shp_values_from_text_java(
+    text: str, 
+    annexure_total: Optional[int] = None, 
+    lockin_locked_hint: Optional[int] = None,
+    total_hint_computed: Optional[int] = None  # [FALLBACK 2026-03-09] Computed total - safe to remove if issues
+) -> Dict:
     """
     Extract SHP values from Java-extracted text using spatial/column-based approach.
     This is a fallback when pdfplumber's sequential approach fails.
@@ -1745,9 +1774,15 @@ def extract_shp_values_from_text_java(text: str, annexure_total: Optional[int] =
 
     # Strategy 6: Boundary-detection position-based (requires hints)
     # More elegant than Strategy 5 - detects boundaries dynamically
-    if annexure_total:
+    # [FALLBACK 2026-03-09] Pass total_hint_computed as fallback
+    if annexure_total or total_hint_computed:
         print(f"  <span class='strategy-trying' style='color: #0275d8;'>[TRYING BOUNDARY DETECTION (Strategy 6)]</span>")
-        result = extract_shp_using_boundary_detection(text, annexure_total, lockin_locked_hint)
+        result = extract_shp_using_boundary_detection(
+            text, 
+            annexure_total,       # DB total (try first - original)
+            lockin_locked_hint,
+            total_hint_computed   # Computed total (fallback) [2026-03-09]
+        )
         if result and result.get('total_verified'):  # Must be FULLY verified
             strategy_results["boundary_detection"] = True
             # Add matched patterns (will be None since we didn't use patterns)

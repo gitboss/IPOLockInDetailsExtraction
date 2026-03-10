@@ -34,10 +34,12 @@ def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed:
         text = f.read()
 
     # Extract using cascade of 8 strategies
+    # [FALLBACK 2026-03-09] Pass total_hint_computed as fallback
     result = extract_shp_with_cascade(
         text=text,
         annexure_total=known_total,
-        lockin_locked_hint=known_locked
+        lockin_locked_hint=known_locked,
+        total_hint_computed=total_hint_computed  # [FALLBACK 2026-03-09]
     )
 
     # Check if extraction succeeded

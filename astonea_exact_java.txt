@@ -1,0 +1,20 @@
+--- PAGE 1 ---
+               
+                                                                      Astonea Labs Ltd 
+               
+                             Number of Distinctive numbers range           T  y  p e            o  f     L  o  c  k  - i n   D  a  t e                   Physical/ 
+                             securities Security (F- Demat 
+                                                                          Fully Paid, P 
+                                                                          – Partly Paid, 
+                                                                          L – Lock –in 
+                                                                          etc) 
+                                            From To  From To  
+                             21,30,000 1 21,30,000 L 23.05.2025 03.06.2028 Demat 
+                             53,89,600 21,30,001 75,19,600 L 23.05.2025 03.06.2026 Demat 
+                             2,01,400 75,19,601 77,21,000 L 24.05.2025 03.06.2026 Demat 
+                             3,95,000 77,21,001 81,16,000 L 30.05.2025 28.06.2025 Demat 
+                             3,95,000 81,16,001 85,11,000 L 30.05.2025 28.08.2025 Demat 
+                             20,00,000 85,11,001 1,05,11,000 F FREE Demat 
+               
+
+######################

@@ -470,6 +470,371 @@ def parse_bse_strategy2_reverse_from_total(text: str, known_total: Optional[int]
     }
 
 
+# ============================================================================
+# [RANGE-CALC 2026-03-09] Strategy 3: Distinctive Number Range Calculation
+# ============================================================================
+# Purpose: Handle format where only From/To are given (no shares column)
+# Format:  From | To | Type | Date
+#          1    | 1640000 | F&L | 29/01/2028
+# Shares calculated as: to - from + 1
+# Rollback: Remove this entire strategy block and its call in parse_bse_text()
+# ============================================================================
+
+def parse_bse_strategy3_range_calculation(text: str, known_total: Optional[int] = None) -> Optional[Dict]:
+    """
+    [RANGE-CALC 2026-03-09] Strategy 3: Calculate shares from distinctive number range
+    
+    Handles format where shares column is missing:
+    - Only 2 numbers per line (From, To) - dates extracted separately
+    - Shares calculated as: to - from + 1
+    
+    [RANGE-CALC 2026-03-09] Same date extraction as Strategy 1
+    
+    Args:
+        text: Raw BSE lock-in text
+        known_total: Known total from database (optional, for validation)
+    
+    Returns:
+        Parsed result dict, or None if strategy fails
+        
+    [RANGE-CALC 2026-03-09] Rollback: Safe to remove entire function
+    """
+    lines = text.split('\n')
+    rows = []
+    header_keywords = ['Distinctive', 'Number of Securities', 'Type of Security', 'From', 'To']
+    
+    # Footer patterns to stop parsing
+    footer_patterns = [
+        r'^\s*Name\s*:', r'^\s*Designation\s*:', r'^\s*Place\s*:',
+        r'\bFor\s+\w+.*Limited', r'Company Secretary', r'Membership No\.',
+        r'^\s*Notes?:', r'The Distinctive Numbers are for the purpose',
+        r'DEMAT\s*-\s*\d+\s*YEAR', r'^\s*For\s+.*\s+Limited\s*$', r'^\s*Sd/-',
+    ]
+    
+    for line in lines:
+        line = line.strip()
+        
+        # Skip empty lines and markers
+        if not line or line.startswith('---') or line.startswith('####'):
+            continue
+        
+        # Stop at footer
+        if any(re.search(pattern, line, re.IGNORECASE) for pattern in footer_patterns):
+            break
+        
+        # [RANGE-CALC 2026-03-09] Same number extraction as Strategy 1
+        # Extract numbers using split() and clean_num() (same as Strategy 1)
+        # Filter out date-like numbers during token extraction
+        tokens = line.split()
+        nums = []
+        for token in tokens:
+            val = clean_num(token)
+            if val is not None:
+                # [RANGE-CALC 2026-03-09] Filter out date-like numbers
+                # Dates like 29/01/2028 become 29012028 (8 digits) - skip these
+                # Dates like 01/01/2025 become 1012025 (7 digits) - skip these
+                # Valid share counts are typically 5-7 digits but NOT date patterns
+                token_clean = token.replace('/', '').replace('-', '').replace('.', '')
+                if len(token_clean) >= 7 and any(sep in token for sep in ['/', '-', '.']):
+                    continue  # Skip date-like tokens
+                nums.append(val)
+        
+        # [RANGE-CALC 2026-03-09] Look for lines with exactly 2 numbers (From, To)
+        # Skip lines with 3+ numbers (handled by other strategies)
+        if len(nums) != 2:
+            # Also skip header lines
+            if len(nums) < 2 and any(kw in line for kw in header_keywords):
+                continue
+            continue
+        
+        from_num = nums[0]
+        to_num = nums[1]
+        
+        # Validate: from should be less than to
+        if from_num >= to_num:
+            continue
+        
+        # [RANGE-CALC 2026-03-09] Calculate shares from range
+        shares = to_num - from_num + 1
+        
+        # [RANGE-CALC 2026-03-09] Same date extraction as Strategy 1
+        date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|NA|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
+        dates_found = re.findall(date_pattern, line, re.IGNORECASE)
+        
+        lockin_date = None
+        from_date_raw = ''
+        to_date_raw = ''
+        
+        if len(dates_found) >= 2:
+            from_date_raw = dates_found[0]
+            to_date_raw = dates_found[1]
+            lockin_date = to_date_raw  # Use to_date as lockin_date
+        elif len(dates_found) == 1:
+            to_date_raw = dates_found[0]
+            lockin_date = to_date_raw
+        
+        # Check for "Free" keywords
+        if not lockin_date or 'free' in line.lower() or 'n/a' in line.lower():
+            is_free = True
+        else:
+            is_free = False
+        
+        # Extract type of security
+        type_patterns = [
+            r'F\s*&\s*L', r'Fully\s+Paid', r'F\s*-?\s*Fully',
+            r'Partly\s+Paid', r'Lock[- ]in', r'IPO', r'Anchor',
+        ]
+        type_security = ''
+        for pattern in type_patterns:
+            type_match = re.search(pattern, line, re.IGNORECASE)
+            if type_match:
+                type_security = norm(type_match.group(0))
+                break
+        
+        # Classify row
+        raw_lockin = lockin_date if lockin_date else ''
+        row_class = classify_row(type_security, raw_lockin)
+        is_free = (row_class == 'free')
+        
+        rows.append({
+            'shares': shares,
+            'from': from_num,
+            'to': to_num,
+            'type_security': type_security,
+            'lockin_date': lockin_date,
+            'from_date': from_date_raw if from_date_raw else None,
+            'to_date': to_date_raw if to_date_raw else None,
+            'is_free': is_free,
+            'raw_lockin': raw_lockin,
+            'row_class': row_class,
+        })
+    
+    if not rows:
+        return None  # [RANGE-CALC 2026-03-09] No rows found
+    
+    # Compute total from rows
+    computed_total = sum(r['shares'] for r in rows)
+    
+    # [RANGE-CALC 2026-03-09] Validate against known_total if provided
+    if known_total and computed_total != known_total:
+        # Allow small tolerance for rounding
+        if abs(computed_total - known_total) > 100:
+            return None  # Mismatch too large
+    
+    # Find declared total from "Total" line
+    declared_total = None
+    for line in lines:
+        if 'total' in line.lower():
+            nums = extract_numbers(line)
+            if nums:
+                declared_total = max(nums)
+                break
+    
+    return {
+        'rows': rows,
+        'declared_total': declared_total,
+        'computed_total': computed_total,
+        'total_match': (declared_total is None or computed_total == declared_total),
+        'rows_count': len(rows),
+        'free_count': sum(1 for r in rows if r.get('is_free')),
+        'locked_count': sum(1 for r in rows if not r.get('is_free')),
+        'free_shares': sum(r['shares'] for r in rows if r.get('is_free')),
+        'locked_shares': sum(r['shares'] for r in rows if not r.get('is_free')),
+        'strategy': 'range_calculation',  # [RANGE-CALC 2026-03-09]
+    }
+
+
+# ============================================================================
+# [ASTONEA-FIX 2026-03-09] Strategy 4: 3-Number Format (No Malformed Cleanup)
+# ============================================================================
+# Purpose: Handle files with 3 numbers (shares, from, to) but WITHOUT aggressive
+#          malformed number cleanup that merges adjacent columns.
+# Use case: Astonea-like formats where columns are close together
+# Format:   Shares From To Type FromDate ToDate Demat
+#           21,30,000 1 21,30,000 L 23.05.2025 03.06.2028 Demat
+# Rollback: Remove this entire strategy block and its call in parse_bse_text()
+# ============================================================================
+
+def parse_bse_strategy4_no_malformed_cleanup(text: str, known_total: Optional[int] = None) -> Optional[Dict]:
+    """
+    [ASTONEA-FIX 2026-03-09] Strategy 4: 3-number format without malformed cleanup
+    
+    Same as Strategy 1 but WITHOUT the aggressive malformed number cleanup regexes
+    that merge adjacent columns (e.g., "1 21,30,000" → "121,30,000").
+    
+    Args:
+        text: Raw BSE lock-in text
+        known_total: Known total from database (optional, for validation)
+    
+    Returns:
+        Parsed result dict, or None if strategy fails
+        
+    [ASTONEA-FIX 2026-03-09] Rollback: Safe to remove entire function
+    """
+    result = {
+        'rows': [],
+        'declared_total': None,
+        'computed_total': 0,
+        'free_shares': 0,
+        'locked_shares': 0,
+        'rows_count': 0,
+        'free_count': 0,
+        'locked_count': 0,
+    }
+    
+    lines = text.split('\n')
+    
+    # Footer patterns (same as Strategy 1)
+    footer_patterns = [
+        r'^\s*Name\s*:', r'^\s*Designation\s*:', r'^\s*Place\s*:',
+        r'\bFor\s+\w+.*Limited', r'Company Secretary', r'Membership No\.',
+        r'^\s*Notes?:', r'The Distinctive Numbers are for the purpose',
+        r'DEMAT\s*-\s*\d+\s*YEAR',
+        r'^\s*For\s+.*\s+Limited\s*$', r'^\s*Sd/-',
+    ]
+    
+    header_keywords = [
+        'Distinctive', 'Number of Securities', 'Lock in date',
+        'Type of Security', 'Physical/Demat', 'Demat/Physical',
+        'Lock-in', 'From', 'To', 'Folio Number'
+    ]
+    
+    for line in lines:
+        line = line.strip()
+        
+        # Skip empty lines and markers
+        if not line or line.startswith('---') or line.startswith('####'):
+            continue
+        
+        # Stop at footer
+        if any(re.search(pattern, line, re.IGNORECASE) for pattern in footer_patterns):
+            break
+        
+        # [ASTONEA-FIX 2026-03-09] NO malformed number cleanup!
+        # Strategy 1 has: line = re.sub(r'(\d) (\d{1,2},)', r'\1\2', line)
+        # We skip this - it merges adjacent columns like "1 21,30,000" → "121,30,000"
+        
+        # Extract numbers using split() and clean_num()
+        tokens = line.split()
+        nums = []
+        for token in tokens:
+            val = clean_num(token)
+            if val is not None:
+                nums.append(val)
+        
+        # Skip header lines (only if they DON'T have 3+ numbers)
+        if len(nums) < 3:
+            if any(kw in line for kw in header_keywords):
+                continue
+            continue
+        
+        # Check if this is a total row
+        line_lower = line.lower()
+        if 'total' in line_lower:
+            if nums:
+                result['declared_total'] = max(nums)
+            continue
+        
+        # Need at least 3 numbers for a valid row (shares, from, to)
+        if len(nums) < 3:
+            continue
+        
+        shares = nums[0]
+        from_num = nums[1]
+        to_num = nums[2]
+        
+        # Validate distinctive number math
+        if from_num > 0 and to_num > 0:
+            expected_shares = to_num - from_num + 1
+            if shares != expected_shares:
+                # Skip malformed rows
+                continue
+        
+        # [ASTONEA-FIX 2026-03-09] Same date extraction as Strategy 1
+        # Supports DD.MM.YYYY, DD/MM/YYYY, DD-Mon-YYYY, etc.
+        date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|NA|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
+        dates_found = re.findall(date_pattern, line, re.IGNORECASE)
+        
+        from_date_raw = ''
+        to_date_raw = ''
+        
+        if len(dates_found) >= 2:
+            from_date_raw = dates_found[0]
+            to_date_raw = dates_found[1]
+        elif len(dates_found) == 1:
+            to_date_raw = dates_found[0]
+        
+        # Parse dates using shared_parsing.py's parse_date_str
+        from_date = parse_date_str(from_date_raw) if from_date_raw else ''
+        to_date = parse_date_str(to_date_raw) if to_date_raw else ''
+        
+        # Extract type of security
+        type_patterns = [
+            r'F\s*&\s*L', r'Fully\s+Paid', r'F\s*-?\s*Fully',
+            r'Partly\s+Paid', r'Lock[- ]in', r'IPO', r'Anchor',
+        ]
+        type_security = ''
+        for pattern in type_patterns:
+            type_match = re.search(pattern, line, re.IGNORECASE)
+            if type_match:
+                type_security = norm(type_match.group(0))
+                break
+        
+        # If no type found, extract text between numbers
+        if not type_security:
+            parts = re.split(r'\d[\d,\s]*', line)
+            for part in parts[3:]:
+                cleaned = norm(part)
+                if cleaned and len(cleaned) > 2:
+                    type_security = cleaned[:30]
+                    break
+        
+        # Extract physical/demat
+        demat_match = re.search(r'(Demat|Physical)', line, re.IGNORECASE)
+        physical_demat = norm(demat_match.group(0)) if demat_match else ''
+        
+        # Classify row
+        raw_lockin = to_date if to_date else from_date
+        row_class = classify_row(type_security, raw_lockin)
+        is_free = (row_class == 'free')
+        
+        result['rows'].append({
+            'shares': shares,
+            'from': from_num,
+            'to': to_num,
+            'type_security': type_security,
+            'from_date': from_date,
+            'to_date': to_date,
+            'raw_lockin': raw_lockin,
+            'physical_demat': physical_demat,
+            'is_free': is_free,
+            'row_class': row_class,
+        })
+        
+        result['computed_total'] += shares
+        if is_free:
+            result['free_shares'] += shares
+            result['free_count'] += 1
+        else:
+            result['locked_shares'] += shares
+            result['locked_count'] += 1
+    
+    result['rows_count'] = len(result['rows'])
+    result['total_match'] = True
+    
+    # Fallback: If no "Total" row found, use computed_total as declared_total
+    if result['declared_total'] is None and result['computed_total'] > 0:
+        result['declared_total'] = result['computed_total']
+    
+    # [ASTONEA-FIX 2026-03-09] Validate against known_total if provided
+    if known_total and result['computed_total'] > 0:
+        if abs(result['computed_total'] - known_total) > 100:
+            return None  # Mismatch too large
+    
+    result['strategy'] = 'no_malformed_cleanup'  # [ASTONEA-FIX 2026-03-09]
+    return result
+
+
 def parse_bse_strategy1_line_by_line(text: str) -> Dict:
     """
     Strategy 1: Line-by-line parsing (original BSE parser)
@@ -667,6 +1032,8 @@ def parse_bse_text(text: str, known_total: Optional[int] = None) -> Dict:
     Strategies (in order):
     1. Strategy 2: Total Validation (uses known_total if provided, or finds TOTAL in text)
     2. Strategy 1: Line-by-line (original parser, fallback)
+    3. Strategy 4: 3-number format without malformed cleanup [ASTONEA-FIX 2026-03-09]
+    4. Strategy 3: Distinctive Number Range Calculation [RANGE-CALC 2026-03-09]
 
     Args:
         text: Raw BSE lock-in text
@@ -680,6 +1047,31 @@ def parse_bse_text(text: str, known_total: Optional[int] = None) -> Dict:
     if result is not None and len(result.get('rows', [])) > 0:
         return result
 
-    # Fallback to Strategy 1
+    # Try Strategy 1 (line-by-line)
     result = parse_bse_strategy1_line_by_line(text)
-    return result
+    if result is not None and len(result.get('rows', [])) > 0:
+        return result
+
+    # [ASTONEA-FIX 2026-03-09] Try Strategy 4 (3-number format, no malformed cleanup)
+    result = parse_bse_strategy4_no_malformed_cleanup(text, known_total)
+    if result is not None and len(result.get('rows', [])) > 0:
+        return result
+
+    # [RANGE-CALC 2026-03-09] Try Strategy 3 (range calculation - 2 numbers only)
+    result = parse_bse_strategy3_range_calculation(text, known_total)
+    if result is not None and len(result.get('rows', [])) > 0:
+        return result
+
+    # All strategies failed
+    return {
+        'rows': [],
+        'declared_total': None,
+        'computed_total': 0,
+        'total_match': False,
+        'rows_count': 0,
+        'free_count': 0,
+        'locked_count': 0,
+        'free_shares': 0,
+        'locked_shares': 0,
+        'strategy': 'all_failed',
+    }
