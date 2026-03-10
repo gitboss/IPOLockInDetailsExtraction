@@ -17,12 +17,13 @@ class RowStatus(Enum):
 
 class LockBucket(Enum):
     """Lock-in duration buckets"""
-    YEARS_3_PLUS = "3+YEARS"
-    YEARS_2_PLUS = "2+YEARS"
-    YEARS_1_PLUS = "1+YEAR"
-    ANCHOR_90_DAYS = "ANCHOR_90DAYS"
-    ANCHOR_30_DAYS = "ANCHOR_30DAYS"
-    FREE = "FREE"
+    YEARS_3_PLUS = "3_year_plus"
+    YEARS_2_PLUS = "2_year_plus"
+    YEARS_1_PLUS = "1_year_plus"
+    ONE_YEAR_MINUS = "1_year_minus"
+    ANCHOR_90_DAYS = "anchor_90"
+    ANCHOR_30_DAYS = "anchor_30"
+    FREE = "free"
 
 
 @dataclass

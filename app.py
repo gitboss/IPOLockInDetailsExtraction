@@ -538,7 +538,7 @@ class IPOProcessor:
                 # Continue with parsing attempt
 
             try:
-                self.lockin_data = parse_lockin_file(self.lockin_java_txt, self.allotment_date)
+                self.lockin_data = parse_lockin_file(self.lockin_java_txt, self.allotment_date, self.declared_total)
                 self.log_step(step_num, "✓", f"Lock-in parsed: {len(self.lockin_data.rows)} rows, Total={self.lockin_data.computed_total:,}, Locked={self.lockin_data.locked_total:,}")
             except Exception as e:
                 print(f"\n❌ Error parsing lock-in file: {e}")

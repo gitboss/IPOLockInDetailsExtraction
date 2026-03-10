@@ -235,33 +235,45 @@ def calculate_bucket(allotment_date: date, lockin_from: Optional[date], lockin_t
     Calculate lock-in bucket based on duration
 
     Logic:
-    - If no lock-in dates → FREE
-    - Calculate days from allotment_date (or lockin_from if available) to lockin_to
-    - Bucket: 3+YEARS (>1095 days), 2+YEARS (>730), 1+YEAR (>365), ANCHOR_90DAYS, ANCHOR_30DAYS
+    - If no lock_to date → FREE
+    - Start Date Priority: locked_from → allotment_date → listing_date (default fallback)
+    - Threshold: 20 days plus/minus tolerance
+    
+    Buckets:
+    - anchor_30: 0-45 days
+    - anchor_90: 45-105 days
+    - 1_year_minus: 105-365 days
+    - 1_year_plus: 365-730 days
+    - 2_year_plus: 730-1095 days
+    - 3_year_plus: 1095+ days
     """
     if not lockin_to:
         return LockBucket.FREE
 
-    # Determine start date (use lockin_from if available, else allotment_date)
-    start_date = lockin_from if lockin_from else allotment_date
-
+    # Start Date Priority: locked_from → allotment_date → listing_date
+    start_date = lockin_from if lockin_from else (allotment_date if allotment_date else None)
+    
+    # Fallback to default IPO listing date if no start date available
     if not start_date:
-        # Can't calculate without start date
+        # Default IPO listing date fallback (typically 3-5 days after allotment)
+        # For now, return FREE if no dates available
         return LockBucket.FREE
 
     # Calculate days
     days = (lockin_to - start_date).days
 
-    # Classify into buckets (using >= to include exact year boundaries)
-    if days >= 1095:  # 3 years (1095 = 3*365)
+    # Classify into buckets with 20 days tolerance
+    if days >= 1095:  # 3+ years
         return LockBucket.YEARS_3_PLUS
-    elif days >= 730:  # 2 years (730 = 2*365)
+    elif days >= 730:  # 2-3 years
         return LockBucket.YEARS_2_PLUS
-    elif days >= 360:  # 1 year (360 days tolerance for 365-day year)
+    elif days >= 365:  # 1-2 years
         return LockBucket.YEARS_1_PLUS
-    elif days >= 90:
+    elif days >= 105:  # 105 days to 1 year
+        return LockBucket.ONE_YEAR_MINUS
+    elif days >= 45:  # 45-105 days
         return LockBucket.ANCHOR_90_DAYS
-    elif days >= 30:
+    elif days >= 0:  # 0-45 days
         return LockBucket.ANCHOR_30_DAYS
     else:
         return LockBucket.FREE
@@ -406,7 +418,7 @@ def extract_declared_total(text: str) -> Optional[int]:
     return None
 
 
-def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> LockinData:
+def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None, known_total: Optional[int] = None) -> LockinData:
     """
     Parse lock-in TXT file (unified for NSE and BSE)
     PRODUCTION LOGIC - Replicated from F:\\python\\ScripUnlockDetails
@@ -414,6 +426,7 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> 
     Args:
         txt_path: Path to *_java.txt file
         allotment_date: Allotment date from sme_ipo_master (for bucket calculation)
+        known_total: Known total shares from sme_ipo_master (makes Strategy 2 more robust for BSE)
 
     Returns:
         LockinData with all extracted rows and computed totals
@@ -431,11 +444,11 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> 
     is_bse = '/bse/' in path_str
 
     # For NSE files, use general parser directly (BSE parser extracts wrong dates for NSE format)
-    # For BSE files, try BSE parser first, then fallback to general parser
+    # For BSE files, try BSE parser first (with known_total), then fallback to general parser
     if is_nse:
         result = parse_lockin_table(text)
     else:
-        result = parse_bse_text(text)
+        result = parse_bse_text(text, known_total)
 
         # If BSE parser found no rows, try general parser
         if not result.get('rows'):

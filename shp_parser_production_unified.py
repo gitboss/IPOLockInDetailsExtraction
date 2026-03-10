@@ -1800,9 +1800,10 @@ def extract_shp_values_from_text_java(
 
     # Strategy 7: Column count validation with math verification (NEW)
     # Pure number-based: filters by column count, validates by math
-    if annexure_total:
+    # [FALLBACK 2026-03-10] Use total_hint_computed if annexure_total unavailable
+    if annexure_total or total_hint_computed:
         print(f"  <span class='strategy-trying' style='color: #0275d8;'>[TRYING COLUMN COUNT VALIDATION (Strategy 7)]</span>")
-        result = extract_shp_with_column_count_validation(text, annexure_total, lockin_locked_hint)
+        result = extract_shp_with_column_count_validation(text, annexure_total or total_hint_computed, lockin_locked_hint)
         if result and result.get('total_verified') and result.get('maths_verified'):
             strategy_results["column_count_validation"] = True
             result["matched_patterns"] = {
@@ -1819,9 +1820,10 @@ def extract_shp_values_from_text_java(
 
     # Strategy 5: Pure position-based (FINAL FALLBACK - requires hints)
     # Runs if Strategies 6 & 7 failed AND we have known_total
-    if annexure_total:
+    # [FALLBACK 2026-03-10] Use total_hint_computed if annexure_total unavailable
+    if annexure_total or total_hint_computed:
         print(f"  [TRYING SIMPLE POSITION-BASED (Strategy 5)]")
-        result = extract_shp_using_simple_position(text, annexure_total, lockin_locked_hint)
+        result = extract_shp_using_simple_position(text, annexure_total or total_hint_computed, lockin_locked_hint)
         if result and result.get('total_verified'):  # Must be FULLY verified
             strategy_results["simple_position"] = True
             # Add matched patterns (will be None since we didn't use patterns)

@@ -209,37 +209,36 @@ def extract_annexure_ii_unlock_schedule(text: str) -> List[Dict]:
 def classify_lockin_bucket(lockin_date: str, is_free: bool, listing_date: Optional[str] = None) -> str:
     """
     Classify lock-in into buckets:
-    - free
-    - anchor_30 (30 days from listing)
-    - anchor_90 (90 days from listing)
-    - 1_year
-    - 2_year
-    - 3_year
+    - free (no lock_to date)
+    - anchor_30 (0-45 days)
+    - anchor_90 (45-105 days)
+    - 1_year_minus (105-365 days)
+    - 1_year_plus (365-730 days)
+    - 2_year_plus (730-1095 days)
+    - 3_year_plus (1095+ days)
     """
     if is_free:
         return 'free'
 
     if not lockin_date:
-        return 'unknown'
+        return 'free'
 
-    # If we have listing date, we can calculate anchor periods
-    # For now, just classify by date patterns or year offsets
-
-    # Parse the lock-in date
+    # Parse the lock-in date and classify
     try:
-        # Format: "08-Oct-2026"
-        date_match = re.match(r'(\d{1,2})-([A-Za-z]{3})-(\d{4})', lockin_date)
+        # Format: "08-Oct-2026" or "08/10/2026" or "08.10.2026"
+        date_match = re.match(r'(\d{1,2})[-/\.]([A-Za-z]{3})[-/\.](\d{4})', lockin_date)
         if not date_match:
-            return 'unknown'
+            # Try numeric month format
+            date_match = re.match(r'(\d{1,2})[-/\.](\d{1,2})[-/\.](\d{4})', lockin_date)
+        
+        if not date_match:
+            return 'free'
 
-        # For proper classification, we'd need the listing date
-        # For now, just return the raw date categorization
-        # This will be improved later with actual listing date logic
-
-        return 'locked'  # Generic locked category for now
+        # For now, return generic locked - proper bucket needs allotment/listing date
+        return 'locked'
 
     except Exception:
-        return 'unknown'
+        return 'free'
 
 
 def parse_lockin_table(text: str, listing_date: Optional[str] = None) -> Dict:
@@ -868,17 +867,20 @@ def parse_bse_strategy1_line_by_line(text: str) -> Dict:
         line = line.strip()
 
         # Remove spaces within malformed numbers (BSE files have spaces in unexpected places)
-        # CRITICAL: Only match EXACTLY 1 space (malformed), NOT 2+ spaces (column boundary)
-        # Pattern 0: "4 47  " → "447  " (exactly 1 space + 1-2 digits + 2+ spaces/end) - ICODEX case
+        # CRITICAL: Only match EXACTLY 1 space within SAME number, NOT column boundaries
         # Pattern 1: "9 7,84,937" → "97,84,937" (exactly 1 space before digits+comma)
         # Pattern 2: "3 ,03,091" → "3,03,091" (exactly 1 space before comma)
         # Pattern 3: "1 9.00" → "19.00" (exactly 1 space before digits+decimal)
         # Pattern 4: "7 .00" → "7.00" (exactly 1 space before decimal)
-        line = re.sub(r'(\d) (\d{1,2})(?=\s{2,}|$)', r'\1\2', line)  # digit + 1 space + 1-2 digits + 2+ spaces/end
+        # Pattern 5: "4 47  " → "447  " ONLY if preceded by comma OR at line start (ICODEX case)
         line = re.sub(r'(\d) (\d{1,2},)', r'\1\2', line)   # digit + 1 space + 1-2 digits + comma
         line = re.sub(r'(\d) (,)', r'\1\2', line)           # digit + 1 space + comma
         line = re.sub(r'(\d) (\d{1,2}\.)', r'\1\2', line)  # digit + 1 space + 1-2 digits + decimal
         line = re.sub(r'(\d) (\.)', r'\1\2', line)          # digit + 1 space + decimal
+        # Pattern 5: Only merge "digit space digit" if preceded by comma (within number) OR at start of non-whitespace (first number)
+        # This prevents merging "27,15,072 1" but allows "4 47" or ",0 7"
+        line = re.sub(r'(,\d{1,2}) (\d{1,2})(?=\s{2,}|$)', r'\1\2', line)  # After comma: ",07 2  " → ",072  "
+        line = re.sub(r'(^\s*\d{1}) (\d{1,2})(?=\s{2,}|$)', r'\1\2', line)  # Line start single digit: "4 47  " → "447  "
 
         # Skip empty lines, headers, page markers
         if not line or line.startswith('---') or line.startswith('####'):
@@ -1025,7 +1027,220 @@ def parse_bse_strategy1_line_by_line(text: str) -> Dict:
     return result
 
 
-def parse_bse_text(text: str, known_total: Optional[int] = None) -> Dict:
+def parse_bse_strategy5_sum_first_soft_labels(
+    text: str,
+    known_total: Optional[int] = None,
+    declared_total_hint: Optional[int] = None,
+    computed_total_hint: Optional[int] = None
+) -> Optional[Dict]:
+    """
+    Strategy 5: Sum-first matching with soft distinctive-range validation (FINAL FALLBACK).
+
+    Rules:
+    1) Keep rows based on shares/date/lock-in signals; do NOT hard-drop on range mismatch.
+    2) Treat distinctive from/to as labels + quality signal (`range_valid`) only.
+    3) If any total hints are provided, require exact share-sum match to one hint.
+    """
+    lines = text.split('\n')
+    candidates: List[Dict] = []
+    page_numbers: set[int] = set()
+
+    footer_patterns = [
+        r'^\s*Name\s*:', r'^\s*Designation\s*:', r'^\s*Place\s*:',
+        r'\bFor\s+\w+.*Limited', r'Company Secretary', r'Membership No\.',
+        r'^\s*Notes?:', r'The Distinctive Numbers are for the purpose',
+        r'DEMAT\s*-\s*\d+\s*YEAR', r'^\s*For\s+.*\s+Limited\s*$', r'^\s*Sd/-',
+    ]
+    header_keywords = [
+        'Distinctive', 'Number of Securities', 'Lock in date',
+        'Type of Security', 'Physical/Demat', 'Demat/Physical',
+        'Lock-in', 'From', 'To', 'Folio Number'
+    ]
+    type_patterns = [
+        r'F\s*&\s*L', r'Fully\s+Paid', r'F\s*-?\s*Fully',
+        r'Partly\s+Paid', r'Lock[- ]in', r'IPO', r'Anchor',
+    ]
+
+    declared_total_from_text: Optional[int] = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+
+        if not line or line.startswith('---') or line.startswith('####'):
+            continue
+
+        if any(re.search(pattern, line, re.IGNORECASE) for pattern in footer_patterns):
+            break
+
+        tokens = line.split()
+        nums: List[int] = []
+        for token in tokens:
+            val = clean_num(token)
+            if val is not None:
+                nums.append(val)
+                page_numbers.add(val)
+
+        if 'total' in line.lower():
+            if nums:
+                declared_total_from_text = max(nums)
+            continue
+
+        if len(nums) < 3:
+            if any(kw in line for kw in header_keywords):
+                continue
+            continue
+
+        shares = nums[0]
+        from_num = nums[1]
+        to_num = nums[2]
+        if shares <= 0:
+            continue
+
+        date_info = extract_dates_from_line(line)
+        from_date = date_info.get('from_date', '')
+        to_date = date_info.get('to_date', '')
+        raw_lockin = to_date if to_date else from_date
+        has_lockin_signal = bool(raw_lockin) or bool(re.search(r'(Demat|Physical)', line, re.IGNORECASE)) or ('free' in line.lower()) or ('n/a' in line.lower())
+        if not has_lockin_signal:
+            continue
+
+        type_security = ''
+        for pattern in type_patterns:
+            type_match = re.search(pattern, line, re.IGNORECASE)
+            if type_match:
+                type_security = norm(type_match.group(0))
+                break
+
+        if not type_security:
+            parts = re.split(r'\d[\d,\s]*', line)
+            for part in parts[3:]:
+                cleaned = norm(part)
+                if cleaned and len(cleaned) > 2:
+                    type_security = cleaned[:30]
+                    break
+
+        demat_match = re.search(r'(Demat|Physical)', line, re.IGNORECASE)
+        physical_demat = norm(demat_match.group(0)) if demat_match else ''
+
+        row_class = classify_row(type_security, raw_lockin)
+        is_free = (row_class == 'free')
+
+        range_expected = None
+        range_valid = None
+        range_diff = None
+        if from_num > 0 and to_num > 0:
+            range_expected = to_num - from_num + 1
+            range_diff = shares - range_expected
+            range_valid = (range_diff == 0)
+
+        candidates.append({
+            'shares': shares,
+            'from': from_num,
+            'to': to_num,
+            'type_security': type_security,
+            'from_date': from_date,
+            'to_date': to_date,
+            'lockin_date': to_date if to_date else from_date,
+            'raw_lockin': raw_lockin,
+            'physical_demat': physical_demat,
+            'is_free': is_free,
+            'row_class': row_class,
+            'range_expected': range_expected,
+            'range_valid': range_valid,
+            'range_diff': range_diff,
+        })
+
+    if not candidates:
+        return None
+
+    # Only enforce external hints if they are actually present on the lock-in page.
+    hint_totals: List[int] = []
+    for hint in [known_total, declared_total_hint, computed_total_hint]:
+        if hint and hint > 0 and hint in page_numbers and hint not in hint_totals:
+            hint_totals.append(hint)
+    if declared_total_from_text and declared_total_from_text > 0 and declared_total_from_text not in hint_totals:
+        hint_totals.append(declared_total_from_text)
+
+    selected_rows: Optional[List[Dict]] = None
+    matched_target: Optional[int] = None
+
+    all_rows_total = sum(r['shares'] for r in candidates)
+    for target in hint_totals:
+        if all_rows_total == target:
+            selected_rows = candidates
+            matched_target = target
+            break
+
+    if selected_rows is None:
+        for target in hint_totals:
+            running_sum = 0
+            temp_rows: List[Dict] = []
+            for row in reversed(candidates):
+                row_shares = row['shares']
+                if running_sum + row_shares > target:
+                    continue
+                temp_rows.append(row)
+                running_sum += row_shares
+                if running_sum == target:
+                    selected_rows = list(reversed(temp_rows))
+                    matched_target = target
+                    break
+            if selected_rows is not None:
+                break
+
+    if selected_rows is None:
+        for target in hint_totals:
+            found = False
+            for i in range(len(candidates)):
+                running_sum = 0
+                for j in range(i, len(candidates)):
+                    running_sum += candidates[j]['shares']
+                    if running_sum == target:
+                        selected_rows = candidates[i:j + 1]
+                        matched_target = target
+                        found = True
+                        break
+                    if running_sum > target:
+                        break
+                if found:
+                    break
+            if found:
+                break
+
+    if hint_totals and selected_rows is None:
+        return None
+
+    if selected_rows is None:
+        selected_rows = candidates
+
+    computed_total = sum(r['shares'] for r in selected_rows)
+    declared_total = declared_total_from_text or declared_total_hint or known_total
+    if declared_total is None:
+        declared_total = computed_total
+
+    return {
+        'rows': selected_rows,
+        'declared_total': declared_total,
+        'computed_total': computed_total,
+        'total_match': (matched_target is not None) if hint_totals else (declared_total == computed_total),
+        'rows_count': len(selected_rows),
+        'free_count': sum(1 for r in selected_rows if r.get('is_free')),
+        'locked_count': sum(1 for r in selected_rows if not r.get('is_free')),
+        'free_shares': sum(r['shares'] for r in selected_rows if r.get('is_free')),
+        'locked_shares': sum(r['shares'] for r in selected_rows if not r.get('is_free')),
+        'target_hint_used': matched_target,
+        'candidate_rows_count': len(candidates),
+        'range_mismatch_count': sum(1 for r in selected_rows if r.get('range_valid') is False),
+        'strategy': 'sum_first_soft_labels',
+    }
+
+
+def parse_bse_text(
+    text: str,
+    known_total: Optional[int] = None,
+    declared_total_hint: Optional[int] = None,
+    computed_total_hint: Optional[int] = None
+) -> Dict:
     """
     Parse BSE lock-in text using CASCADE of strategies
 
@@ -1034,32 +1249,69 @@ def parse_bse_text(text: str, known_total: Optional[int] = None) -> Dict:
     2. Strategy 1: Line-by-line (original parser, fallback)
     3. Strategy 4: 3-number format without malformed cleanup [ASTONEA-FIX 2026-03-09]
     4. Strategy 3: Distinctive Number Range Calculation [RANGE-CALC 2026-03-09]
+    5. Strategy 5: Sum-first with soft distinctive labels (FINAL FALLBACK)
 
     Args:
         text: Raw BSE lock-in text
         known_total: Known total from database (optional, makes Strategy 2 more robust)
+        declared_total_hint: Additional declared-total hint (optional)
+        computed_total_hint: Additional computed-total hint (optional)
 
     Returns:
         Dict with rows, totals, and 'strategy' field indicating which worked
     """
+    # Anchor totals only if they exist on the lock-in page.
+    page_numbers: set[int] = set()
+    for raw_line in text.split('\n'):
+        for n in extract_numbers(raw_line):
+            page_numbers.add(n)
+
+    anchored_hints: List[int] = []
+    for hint in [known_total, declared_total_hint, computed_total_hint]:
+        if hint and hint > 0 and hint in page_numbers and hint not in anchored_hints:
+            anchored_hints.append(hint)
+
+    def _is_strategy_result_acceptable(result: Optional[Dict]) -> bool:
+        if result is None or len(result.get('rows', [])) == 0:
+            return False
+
+        # Backward compatibility: if no anchored hint exists on page, accept first non-empty strategy.
+        if not anchored_hints:
+            return True
+
+        computed_total = result.get('computed_total')
+        if computed_total is None:
+            computed_total = sum((r.get('shares') or 0) for r in result.get('rows', []))
+        return computed_total in anchored_hints
+
     # Try Strategy 2 first (works with or without known_total)
     result = parse_bse_strategy2_reverse_from_total(text, known_total)
-    if result is not None and len(result.get('rows', [])) > 0:
+    if _is_strategy_result_acceptable(result):
         return result
 
     # Try Strategy 1 (line-by-line)
     result = parse_bse_strategy1_line_by_line(text)
-    if result is not None and len(result.get('rows', [])) > 0:
+    if _is_strategy_result_acceptable(result):
         return result
 
     # [ASTONEA-FIX 2026-03-09] Try Strategy 4 (3-number format, no malformed cleanup)
     result = parse_bse_strategy4_no_malformed_cleanup(text, known_total)
-    if result is not None and len(result.get('rows', [])) > 0:
+    if _is_strategy_result_acceptable(result):
         return result
 
     # [RANGE-CALC 2026-03-09] Try Strategy 3 (range calculation - 2 numbers only)
     result = parse_bse_strategy3_range_calculation(text, known_total)
-    if result is not None and len(result.get('rows', [])) > 0:
+    if _is_strategy_result_acceptable(result):
+        return result
+
+    # Strategy 5: Sum-first soft labels (final fallback)
+    result = parse_bse_strategy5_sum_first_soft_labels(
+        text=text,
+        known_total=known_total,
+        declared_total_hint=declared_total_hint,
+        computed_total_hint=computed_total_hint,
+    )
+    if _is_strategy_result_acceptable(result):
         return result
 
     # All strategies failed

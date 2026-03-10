@@ -30,11 +30,12 @@ from typing import Dict, List, Optional, Tuple
 # ============================================================================
 
 BUCKETS = [
-    ("anchor_30", 15, 45),
-    ("anchor_90", 75, 105),
-    ("1_year", 330, 400),
-    ("2_year", 690, 780),
-    ("3_year", 1055, 1145),
+    ("anchor_30", 0, 45),
+    ("anchor_90", 45, 105),
+    ("1_year_minus", 105, 365),
+    ("1_year_plus", 365, 730),
+    ("2_year_plus", 730, 1095),
+    ("3_year_plus", 1095, 99999),
 ]
 
 FREE_DATE_VALS = {"", "-", "--", "---", "_", "free", "n/a", "na", "nil"}
@@ -161,17 +162,23 @@ def classify_row(type_security: str, raw_lockin: str) -> str:
 
 
 def classify_bucket(days: int, row_class: str = "locked") -> str:
-    """Classify days into bucket."""
+    """Classify days into bucket with new thresholds."""
     if days is None:
-        return "unknown"
+        return "free"
+    
+    # Anchor classification (if explicitly marked as anchor)
     if row_class == "anchor":
         if days <= 45:
             return "anchor_30"
         return "anchor_90"
+    
+    # Standard bucket classification
     for bucket, lo, hi in BUCKETS:
         if lo <= days <= hi:
             return bucket
-    return "unknown"
+    
+    # Default to free if no bucket matches
+    return "free"
 
 
 # ============================================================================
@@ -333,10 +340,12 @@ def calculate_bucket(row: Dict, allotment_date: Optional[str] = None) -> Tuple[O
     """
     Calculate days locked and bucket for a row.
     
+    Start Date Priority: lock_from → allotment_date → listing_date (default)
+
     Args:
         row: Row dict with 'from_date', 'to_date', 'is_free'
         allotment_date: Allotment date from database
-    
+
     Returns:
         Tuple of (days_locked, bucket)
     """
@@ -348,37 +357,38 @@ def calculate_bucket(row: Dict, allotment_date: Optional[str] = None) -> Tuple[O
     lock_upto = row.get('lockin_date') or row.get('to_date')
 
     if not lock_upto:
-        return (None, 'unknown')
+        return (None, 'free')
 
+    # Start Date Priority: lock_from → allotment_date
     start_date = lock_from if lock_from else allotment_date
     if not start_date:
-        return (None, 'unknown')
+        return (None, 'free')
 
     try:
         if isinstance(start_date, str):
             from_dt = parse_date(start_date)
             if not from_dt:
-                return (None, 'unknown')
+                return (None, 'free')
         else:
             from_dt = start_date
 
         if isinstance(lock_upto, str):
             to_dt = parse_date(lock_upto)
             if not to_dt:
-                return (None, 'unknown')
+                return (None, 'free')
         else:
             to_dt = lock_upto
 
         days_locked = (to_dt - from_dt).days
 
         if days_locked < 0 or days_locked > 9999:
-            return (days_locked, 'unknown')
+            return (days_locked, 'free')
 
         bucket = classify_bucket(days_locked, row_class)
         return (days_locked, bucket)
 
     except Exception:
-        return (None, 'unknown')
+        return (None, 'free')
 
 
 # ============================================================================

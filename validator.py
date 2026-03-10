@@ -211,10 +211,10 @@ def validate_rule6(lockin: LockinData, anchor_letter_url: str) -> ValidationResu
     If anchor_letter_url exists → must find anchor rows
     If anchor_letter_url is NULL → must NOT find anchor rows
     """
-    # Count anchor rows
+    # Count anchor rows (using NEW bucket names)
     anchor_rows = [
         row for row in lockin.rows
-        if row.bucket.value in ('ANCHOR_90DAYS', 'ANCHOR_30DAYS')
+        if row.bucket.value in ('anchor_90', 'anchor_30')
     ]
     anchor_count = len(anchor_rows)
     has_anchor_rows = anchor_count > 0

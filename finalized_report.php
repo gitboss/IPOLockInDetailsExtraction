@@ -107,6 +107,8 @@ try {
   foreach ($records as &$rec) {
     $rec['rows'] = $rows_by_record[$rec['id']] ?? [];
     $rec['overlay_rows'] = $ungrouped_by_record[$rec['id']] ?? [];
+    // [STRATEGY-TRACKING 2026-03-09] Decode validation_results JSON to access _strategies
+    $rec['validation_results'] = $rec['validation_results'] ? json_decode($rec['validation_results'], true) : null;
     // Extract symbol and code from file_name (format: CODE-SYMBOL-Annexure-I.pdf)
     if (preg_match('/^([0-9]+)-([A-Z\-]+)-Annexure-I\.pdf$/', $rec['file_name'], $matches)) {
       $rec['exchange_code'] = $matches[1];  // e.g., 544324
@@ -575,27 +577,46 @@ try {
       white-space: nowrap;
     }
 
-    .bk-anchor_30 {
+    .bk-anchor_30,
+    .bk-anchor_30_days,
+    .bk-anchor_30days {
       background: #2a1f3d;
       color: var(--purple);
     }
 
-    .bk-anchor_90 {
+    .bk-anchor_90,
+    .bk-anchor_90_days,
+    .bk-anchor_90days {
       background: #271d3a;
       color: #a37eee;
     }
 
-    .bk-1_year {
+    .bk-1_year_minus,
+    .bk-1-year-minus {
+      background: #1a2e2e;
+      color: #3dd5d5;
+    }
+
+    .bk-1_year_plus,
+    .bk-1-year-plus,
+    .bk-1+year,
+    .bk-years_1_plus {
       background: #1a2e1a;
       color: var(--green);
     }
 
-    .bk-2_year {
+    .bk-2_year_plus,
+    .bk-2-year-plus,
+    .bk-2+years,
+    .bk-years_2_plus {
       background: #162a16;
       color: #3da53d;
     }
 
-    .bk-3_year {
+    .bk-3_year_plus,
+    .bk-3-year-plus,
+    .bk-3+years,
+    .bk-years_3_plus {
       background: #122212;
       color: #379137;
     }
@@ -608,73 +629,6 @@ try {
     .bk-unknown {
       background: #261e10;
       color: var(--yellow);
-    }
-
-    .bk-years_1_plus,
-    .bk-1-year {
-      background: #1a2e1a;
-      color: var(--green);
-    }
-
-    .bk-years_2_plus,
-    .bk-2-years {
-      background: #162a16;
-      color: #3da53d;
-    }
-
-    .bk-years_3_plus,
-    .bk-3-years {
-      background: #122212;
-      color: #379137;
-    }
-
-    .bk-anchor_30_days {
-      background: #2a1f3d;
-      color: var(--purple);
-    }
-
-    .bk-anchor_90_days {
-      background: #271d3a;
-      color: #a37eee;
-    }
-
-    .bk-anchor_30days,
-    .bk-anchor_30 {
-      background: #2a1f3d;
-      color: var(--purple);
-    }
-
-    .bk-anchor_90days,
-    .bk-anchor_90 {
-      background: #271d3a;
-      color: #a37eee;
-    }
-
-    .bk-1+year,
-    .bk-1-year,
-    .bk-1_year,
-    .bk-years_1_plus,
-    .bk-1-year {
-      background: #1a2e1a;
-      color: var(--green);
-    }
-
-    .bk-2+years,
-    .bk-2-years,
-    .bk-2_year,
-    .bk-years_2_plus,
-    .bk-2-years {
-      background: #162a16;
-      color: #3da53d;
-    }
-
-    .bk-3+years,
-    .bk-3-years,
-    .bk-3_year,
-    .bk-years_3_plus,
-    .bk-3-years {
-      background: #122212;
-      color: #379137;
     }
 
     /* No rows */
@@ -1153,11 +1107,12 @@ try {
     <label>Bucket
       <select id="filter-bucket">
         <option value="">All</option>
-        <option value="anchor_30days">Anchor 30d</option>
-        <option value="anchor_90days">Anchor 90d</option>
-        <option value="1+year">1 Year</option>
-        <option value="2+years">2 Year</option>
-        <option value="3+years">3 Year+</option>
+        <option value="anchor_30">Anchor 30d</option>
+        <option value="anchor_90">Anchor 90d</option>
+        <option value="1_year_minus">&lt;1 Year</option>
+        <option value="1_year_plus">1 Year+</option>
+        <option value="2_year_plus">2 Years+</option>
+        <option value="3_year_plus">3 Years+</option>
         <option value="free">Free</option>
       </select>
     </label>
@@ -1236,6 +1191,10 @@ try {
                 style="color:var(--blue)"></div>
             <div class="edit-field"><label>Processed At</label><input class="edit-input" id="ef-processed" readonly
                 style="color:var(--muted)"></div>
+            <div class="edit-field"><label>Lock-in Strategy</label><input class="edit-input" id="ef-lockin-strategy" readonly
+                style="color:var(--purple)"></div>
+            <div class="edit-field"><label>SHP Strategy</label><input class="edit-input" id="ef-shp-strategy" readonly
+                style="color:var(--purple)"></div>
           </div>
         </div>
         <div class="edit-section">
@@ -1284,11 +1243,12 @@ try {
     function fmtBucket(bucket) {
       if (!bucket) return '-';
       const map = {
-        'anchor_30days': 'Anchor 30d',
-        'anchor_90days': 'Anchor 90d',
-        '1+year': '1 Year',
-        '2+years': '2 Years',
-        '3+years': '3 Years+',
+        'anchor_30': 'Anchor 30d',
+        'anchor_90': 'Anchor 90d',
+        '1_year_minus': '<1 Year',
+        '1_year_plus': '1 Year+',
+        '2_year_plus': '2 Years+',
+        '3_year_plus': '3 Years+',
         'free': 'Free',
         'unknown': 'Unknown'
       };
@@ -1553,6 +1513,11 @@ try {
       document.getElementById('ef-public').value = fmt(s.public_shares);
       document.getElementById('ef-allotment').value = s.allotment_date || '-';
       document.getElementById('ef-processed').value = s.processed_at || '-';
+      
+      // [STRATEGY-TRACKING 2026-03-09] Populate strategy fields from validation_results
+      const strategies = s.validation_results?._strategies || {};
+      document.getElementById('ef-lockin-strategy').value = strategies.lockin_strategy || '(requires re-processing)';
+      document.getElementById('ef-shp-strategy').value = strategies.shp_strategy || '(requires re-processing)';
 
       // Rows table
       const tbody = document.getElementById('edit-rows-tbody');

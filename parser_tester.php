@@ -329,6 +329,14 @@ if (isset($_GET['action'])) {
             background: #1a2e1a;
             color: var(--green);
         }
+        
+        .badge-strategy {
+            background: #1a2a3d;
+            color: var(--blue);
+            font-size: 9px;
+            padding: 2px 6px;
+            margin-left: 4px;
+        }
 
         .loading {
             display: none;
@@ -414,6 +422,12 @@ if (isset($_GET['action'])) {
                 <div class="output-stats" id="output-stats">
                     <!-- Stats will be inserted here -->
                 </div>
+            </div>
+            
+            <div id="strategy-info" style="margin:12px 0;padding:8px;background:var(--card);border:1px solid var(--border2);border-radius:6px;font-size:11px;display:none">
+                <strong style="color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;font-size:9px">Extraction Strategies:</strong>
+                <span id="lockin-strategy-badge" class="badge badge-strategy" style="display:none;margin-left:8px"></span>
+                <span id="shp-strategy-badge" class="badge badge-strategy" style="display:none;margin-left:4px"></span>
             </div>
 
             <table class="results-table" id="results-table">
@@ -514,15 +528,19 @@ if (isset($_GET['action'])) {
         function displayResults(output) {
             const section = document.getElementById('output-section');
             const stats = document.getElementById('output-stats');
+            const strategyInfo = document.getElementById('strategy-info');
+            const lockinStrategyBadge = document.getElementById('lockin-strategy-badge');
+            const shpStrategyBadge = document.getElementById('shp-strategy-badge');
             const tbody = document.getElementById('results-body');
             const rawOutput = document.getElementById('raw-output');
 
             section.style.display = 'block';
             rawOutput.textContent = output;
 
-            // Parse output to extract stats
+            // Parse output to extract stats and strategies
             const lines = output.split('\n');
             const statsData = {};
+            const strategies = { lockin: null, shp: null };
 
             lines.forEach(line => {
                 if (line.includes('Rows Found:')) {
@@ -537,6 +555,17 @@ if (isset($_GET['action'])) {
                     statsData.lockedTotal = line.split(':')[1].trim();
                 } else if (line.includes('Free Total:')) {
                     statsData.freeTotal = line.split(':')[1].trim();
+                } else if (line.includes('Strategy:')) {
+                    // Parse "Strategy: xxx" format
+                    const match = line.match(/Strategy:\s*(\S+)/i);
+                    if (match) {
+                        strategies.lockin = match[1];
+                    }
+                } else if (line.includes('SHP Strategy:')) {
+                    const match = line.match(/SHP Strategy:\s*(\S+)/i);
+                    if (match) {
+                        strategies.shp = match[1];
+                    }
                 }
             });
 
@@ -567,6 +596,25 @@ if (isset($_GET['action'])) {
                     <div class="stat-value">${statsData.freeTotal || '-'}</div>
                 </div>
             `;
+            
+            // Display strategies
+            if (strategies.lockin || strategies.shp) {
+                strategyInfo.style.display = 'block';
+                if (strategies.lockin) {
+                    lockinStrategyBadge.style.display = 'inline-block';
+                    lockinStrategyBadge.textContent = `Lock-in: ${strategies.lockin}`;
+                } else {
+                    lockinStrategyBadge.style.display = 'none';
+                }
+                if (strategies.shp) {
+                    shpStrategyBadge.style.display = 'inline-block';
+                    shpStrategyBadge.textContent = `SHP: ${strategies.shp}`;
+                } else {
+                    shpStrategyBadge.style.display = 'none';
+                }
+            } else {
+                strategyInfo.style.display = 'none';
+            }
 
             // Parse ALL rows from output (not just "First 5 rows")
             tbody.innerHTML = '';
@@ -677,6 +725,7 @@ if (isset($_GET['action'])) {
             document.getElementById('file-select').value = '';
             document.getElementById('content-area').value = '';
             document.getElementById('allotment-date').value = '';
+            document.getElementById('strategy-info').style.display = 'none';
             hideOutput();
         }
     </script>
