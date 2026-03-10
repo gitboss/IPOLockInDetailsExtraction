@@ -71,6 +71,7 @@ class LockinData:
     locked_total: int = 0
     free_total: int = 0
     declared_total: Optional[int] = None  # From TOTAL line in PDF/TXT
+    strategy: Optional[str] = None  # [STRATEGY-TRACKING 2026-03-09] Which parser strategy was used
 
     def compute_totals(self):
         """Calculate totals from rows"""
@@ -86,6 +87,7 @@ class LockinData:
             'locked_total': self.locked_total,
             'free_total': self.free_total,
             'declared_total': self.declared_total,
+            'strategy': self.strategy,  # [STRATEGY-TRACKING 2026-03-09]
         }
 
 
@@ -100,6 +102,7 @@ class SHPData:
     promoter_shares: int
     public_shares: int
     others_shares: int  # Sum of C1 + C2 + C3 + ...
+    strategy_used: Optional[str] = None  # [STRATEGY-TRACKING 2026-03-09] Which SHP strategy was used
 
     def to_dict(self) -> dict:
         """Convert to dictionary"""
@@ -109,6 +112,7 @@ class SHPData:
             'promoter_shares': self.promoter_shares,
             'public_shares': self.public_shares,
             'others_shares': self.others_shares,
+            'strategy_used': self.strategy_used,  # [STRATEGY-TRACKING 2026-03-09]
         }
 
 

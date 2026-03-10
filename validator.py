@@ -302,6 +302,23 @@ def validate_all_rules(
     return results
 
 
+def get_extraction_strategies(lockin: LockinData, shp: SHPData) -> dict:
+    """
+    [STRATEGY-TRACKING 2026-03-09] Get which strategies were used for extraction
+    
+    Args:
+        lockin: Lock-in extraction data
+        shp: SHP extraction data
+    
+    Returns:
+        Dict with strategy info for JSON storage
+    """
+    return {
+        'lockin_strategy': lockin.strategy if lockin else None,
+        'shp_strategy': shp.strategy_used if shp else None,
+    }
+
+
 def main():
     """Test validator with sample data"""
     from models import LockinRow, RowStatus, LockBucket

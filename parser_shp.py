@@ -68,6 +68,7 @@ def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed:
         promoter_shares=result.get('promoter_shares') or 0,
         public_shares=result.get('public_shares') or 0,
         others_shares=result.get('other_shares') or 0,
+        strategy_used=result.get('strategy_used'),  # [STRATEGY-TRACKING 2026-03-09]
     )
 
 

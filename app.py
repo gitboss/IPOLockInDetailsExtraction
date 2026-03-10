@@ -80,6 +80,8 @@ class IPOProcessor:
         self.verbose = args.verbose
         self.gemini_approved = args.GEMAPPROVED
         self.movefiles = args.movefiles
+        self.rollback = args.rollback  # [ROLLBACK 2026-03-09]
+        self.rollback_unique_symbol = args.uniqueSymbol  # [ROLLBACK 2026-03-09] For rollback filter
         self.manual_override = (args.manual_override or "").split(",") if args.manual_override else []
         self.reason = args.reason
 
@@ -88,7 +90,7 @@ class IPOProcessor:
         self.shp_pdf_path = None
         self.symbol = None
         self.code = None
-        self.unique_symbol = None
+        self.unique_symbol = None  # Will be set from filename during processing
 
         # Text file paths
         self.lockin_java_txt = None
@@ -113,6 +115,7 @@ class IPOProcessor:
         self.validations = []
         self.all_rules_passed = False
         self.blank_shp_error = None  # Set if SHP file is blank
+        self.blank_lockin_error = None  # Set if lock-in file is blank [BLANK-TXT 2026-03-09]
 
     def print_header(self):
         """Print formatted header"""
@@ -201,6 +204,24 @@ class IPOProcessor:
             self.unique_symbol = f"NSE:{self.symbol}"
         else:  # BSE
             self.unique_symbol = f"BSE:{self.code}"
+
+        # [GUARD 2026-03-09] Check if already finalized (must rollback first)
+        if not self.no_db and not self.rollback:
+            import db
+            sql = """
+                SELECT status, finalized_at
+                FROM ipo_processing_log
+                WHERE unique_symbol = %s
+                ORDER BY processed_at DESC
+                LIMIT 1
+            """
+            existing = db.execute_query(sql, (self.unique_symbol,), fetch="one")
+            if existing and existing.get('status') == 'FINALIZED':
+                print(f"\n❌ Cannot process: {self.unique_symbol} is already FINALIZED")
+                print(f"   Finalized at: {existing.get('finalized_at', 'N/A')}")
+                print(f"\n   To re-process this scrip, first run rollback:")
+                print(f"   python app.py --rollback --{self.exchange.lower()} --uniqueSymbol {self.symbol}")
+                sys.exit(EXIT_VALIDATION_FAILED)
 
         # SHP PDF path
         shp_dir = DOWNLOADS_DIR / ex_lower / "pdf" / "shp"
@@ -494,6 +515,28 @@ class IPOProcessor:
         step_num += 1
 
         if not self.dry_run:
+            # [BLANK-TXT 2026-03-09] First check if lock-in file is blank
+            try:
+                with open(self.lockin_java_txt, 'r', encoding='utf-8') as f:
+                    lockin_text = f.read()
+
+                if is_blank_text_file(lockin_text):
+                    stats = get_blank_file_stats(lockin_text)
+                    error_msg = f"Blank lock-in file detected ({stats['page_count']} pages, {stats['actual_content_chars']} chars of actual content)"
+                    self.log_step(step_num, "⚠️", error_msg)
+                    print(f"\n⚠️  {error_msg}")
+                    print("   File contains only page markers and separators with no meaningful data")
+                    print("   Finalization will be skipped")
+
+                    # Set lockin_data to None and store error for finalization
+                    self.lockin_data = None
+                    self.blank_lockin_error = error_msg
+                    step_num += 1
+                    return step_num
+            except Exception as e:
+                print(f"\n⚠️  Warning: Could not check if lock-in file is blank: {e}")
+                # Continue with parsing attempt
+
             try:
                 self.lockin_data = parse_lockin_file(self.lockin_java_txt, self.allotment_date)
                 self.log_step(step_num, "✓", f"Lock-in parsed: {len(self.lockin_data.rows)} rows, Total={self.lockin_data.computed_total:,}, Locked={self.lockin_data.locked_total:,}")
@@ -565,6 +608,14 @@ class IPOProcessor:
             # Skip validation if SHP is blank
             if self.blank_shp_error:
                 self.log_step(step_num, "⊗", "Validation skipped (blank SHP file)")
+                self.validations = []
+                self.all_rules_passed = False
+                step_num += 1
+                return step_num
+            
+            # [BLANK-TXT 2026-03-09] Skip validation if lock-in is blank
+            if self.blank_lockin_error:
+                self.log_step(step_num, "⊗", "Validation skipped (blank lock-in file)")
                 self.validations = []
                 self.all_rules_passed = False
                 step_num += 1
@@ -652,6 +703,14 @@ class IPOProcessor:
             if not self.no_db and self.processing_log_id:
                 update_processing_log_error(self.processing_log_id, skip_reason)
             return step_num + 1
+        
+        # [BLANK-TXT 2026-03-09] Check for blank lock-in file
+        if self.blank_lockin_error:
+            skip_reason = f"Finalization skipped: {self.blank_lockin_error}"
+            self.log_step(step_num, "⊗", skip_reason)
+            if not self.no_db and self.processing_log_id:
+                update_processing_log_error(self.processing_log_id, skip_reason)
+            return step_num + 1
 
         # Check if can finalize
         can_finalize, reason = check_can_finalize(
@@ -710,6 +769,209 @@ class IPOProcessor:
         step_num += 1
         return step_num
 
+    def rollback_processing(self) -> int:
+        """
+        Rollback finalized files - reverse of finalization
+        
+        Double confirmation required.
+        Can rollback individual scrip or entire exchange.
+        """
+        from finalizer import rollback_files, check_can_rollback
+        from database import get_finalized_records
+        from datetime import datetime
+        import os
+        
+        print("\n" + "=" * 70)
+        print("ROLLBACK MODE")
+        print("=" * 70)
+        print(f"Exchange: {self.exchange}")
+        
+        if self.rollback_unique_symbol:
+            print(f"Target Symbol: {self.rollback_unique_symbol}")
+        else:
+            print(f"Target: ALL FINALIZED SCRIPS in {self.exchange}")
+        print("=" * 70)
+        
+        # Get finalized records from database
+        if self.no_db:
+            print("\n❌ Rollback requires database access (--nodb not allowed)")
+            return EXIT_VALIDATION_FAILED
+        
+        unique_symbol_filter = f"{self.exchange}:{self.rollback_unique_symbol}" if self.rollback_unique_symbol else None
+        records = get_finalized_records(self.exchange, unique_symbol_filter)
+        
+        if not records:
+            print(f"\n⊗ No finalized records found for rollback")
+            if unique_symbol_filter:
+                print(f"  Symbol: {unique_symbol_filter}")
+            else:
+                print(f"  Exchange: {self.exchange}")
+            return EXIT_SUCCESS
+        
+        print(f"\n📋 Found {len(records)} finalized record(s) for rollback:\n")
+        
+        # Show preview
+        files_to_rollback = []
+        for rec in records:
+            print(f"  Symbol: {rec['unique_symbol']}")
+            print(f"    Processing Log ID: {rec['id']}")
+            print(f"    Finalized At: {rec.get('finalized_at', 'N/A')}")
+
+            # Collect file paths - construct finalized/ paths
+            # Database has original paths, but files were moved to finalized/ subfolder
+            file_paths = {}
+            if rec.get('lockin_pdf_path'):
+                orig_path = Path(rec['lockin_pdf_path'])
+                file_paths['lockin_pdf'] = orig_path.parent / 'finalized' / orig_path.name
+            if rec.get('shp_pdf_path'):
+                orig_path = Path(rec['shp_pdf_path'])
+                file_paths['shp_pdf'] = orig_path.parent / 'finalized' / orig_path.name
+            if rec.get('lockin_txt_java_path'):
+                orig_path = Path(rec['lockin_txt_java_path'])
+                file_paths['lockin_txt'] = orig_path.parent / 'finalized' / orig_path.name
+            if rec.get('shp_txt_java_path'):
+                orig_path = Path(rec['shp_txt_java_path'])
+                file_paths['shp_txt'] = orig_path.parent / 'finalized' / orig_path.name
+            if rec.get('lockin_png_path'):
+                orig_path = Path(rec['lockin_png_path'])
+                file_paths['lockin_png'] = orig_path.parent / 'finalized' / orig_path.name
+
+            # Check which files exist in finalized/
+            existing_files = []
+            for label, path in file_paths.items():
+                if path and path.exists():
+                    existing_files.append(f"      - {label}: {path.name}")
+                    files_to_rollback.append((rec, label, path))
+
+            if existing_files:
+                print(f"    Files in finalized/:")
+                for f in existing_files:
+                    print(f)
+            else:
+                print(f"    ⊗ No files found in finalized/ (already rollbacked?)")
+            print()
+        
+        if not files_to_rollback:
+            print("⊗ No files to rollback - all files already restored or missing")
+            return EXIT_SUCCESS
+        
+        # Double confirmation
+        print("=" * 70)
+        print("⚠️  ROLLBACK CONFIRMATION REQUIRED (1/2)")
+        print("=" * 70)
+        print(f"\nThis action will:")
+        print(f"  - Move {len(files_to_rollback)} file(s) from finalized/ to original folders")
+        print(f"  - Change database status: FINALIZED → VALIDATING")
+        print(f"  - Allow re-processing of these scrips")
+        print(f"\nRecords to rollback:")
+        for rec in records:
+            print(f"  - {rec['unique_symbol']} (ID: {rec['id']})")
+        
+        confirm1 = input("\nType YES to confirm rollback: ").strip()
+        if confirm1.upper() != 'YES':
+            print("\n⊗ Rollback cancelled by user")
+            return EXIT_SUCCESS
+        
+        print("\n" + "=" * 70)
+        print("⚠️  ROLLBACK CONFIRMATION REQUIRED (2/2)")
+        print("=" * 70)
+        confirm2 = input("\nPlease confirm again: ").strip()
+        if confirm2.upper() != 'YES':
+            print("\n⊗ Rollback cancelled by user")
+            return EXIT_SUCCESS
+        
+        # Create log file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"logs/rollback_{self.exchange}_{timestamp}.txt"
+        os.makedirs("logs", exist_ok=True)
+        
+        with open(log_filename, 'w', encoding='utf-8') as log_file:
+            log_file.write(f"ROLLBACK LOG\n")
+            log_file.write(f"{'='*70}\n")
+            log_file.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            log_file.write(f"Exchange: {self.exchange}\n")
+            log_file.write(f"Target: {unique_symbol_filter or 'ALL'}\n")
+            log_file.write(f"Records: {len(records)}\n")
+            log_file.write(f"Files to restore: {len(files_to_rollback)}\n")
+            log_file.write(f"\n")
+            
+            # Execute rollback for each record
+            print("\n" + "=" * 70)
+            print("Executing rollback...")
+            print("=" * 70)
+            
+            success_count = 0
+            error_count = 0
+            
+            for rec in records:
+                print(f"\nRolling back: {rec['unique_symbol']} (ID: {rec['id']})")
+                log_file.write(f"\n{'='*50}\n")
+                log_file.write(f"Symbol: {rec['unique_symbol']}\n")
+                log_file.write(f"ID: {rec['id']}\n")
+                
+                # Get file paths for this record
+                lockin_pdf = Path(rec['lockin_pdf_path']) if rec.get('lockin_pdf_path') else None
+                shp_pdf = Path(rec['shp_pdf_path']) if rec.get('shp_pdf_path') else None
+                lockin_txt = Path(rec['lockin_txt_java_path']) if rec.get('lockin_txt_java_path') else None
+                shp_txt = Path(rec['shp_txt_java_path']) if rec.get('shp_txt_java_path') else None
+                lockin_png = Path(rec['lockin_png_path']) if rec.get('lockin_png_path') else None
+                
+                # Check if files are in finalized/ - construct finalized paths
+                # Database has original paths, but files were moved to finalized/ subfolder
+                finalized_paths = {}
+                if lockin_pdf:
+                    finalized_paths['lockin_pdf'] = lockin_pdf.parent / 'finalized' / lockin_pdf.name
+                if shp_pdf:
+                    finalized_paths['shp_pdf'] = shp_pdf.parent / 'finalized' / shp_pdf.name
+                if lockin_txt:
+                    finalized_paths['lockin_txt'] = lockin_txt.parent / 'finalized' / lockin_txt.name
+                if shp_txt:
+                    finalized_paths['shp_txt'] = shp_txt.parent / 'finalized' / shp_txt.name
+                if lockin_png:
+                    finalized_paths['lockin_png'] = lockin_png.parent / 'finalized' / lockin_png.name
+                
+                # Execute rollback
+                success, restored = rollback_files(
+                    lockin_pdf=finalized_paths.get('lockin_pdf'),
+                    shp_pdf=finalized_paths.get('shp_pdf'),
+                    lockin_txt_java=finalized_paths.get('lockin_txt'),
+                    shp_txt_java=finalized_paths.get('shp_txt'),
+                    lockin_png=finalized_paths.get('lockin_png'),
+                    exchange=self.exchange,
+                    processing_log_id=rec['id'],
+                    dryrun=self.dry_run,
+                    log_file=log_file
+                )
+                
+                if success:
+                    success_count += 1
+                    print(f"  ✓ Rollback complete: {rec['unique_symbol']}")
+                else:
+                    error_count += 1
+                    print(f"  ✗ Rollback had errors: {rec['unique_symbol']}")
+            
+            # Write summary to log
+            log_file.write(f"\n{'='*70}\n")
+            log_file.write(f"ROLLBACK SUMMARY\n")
+            log_file.write(f"{'='*70}\n")
+            log_file.write(f"Successful: {success_count}\n")
+            log_file.write(f"Errors: {error_count}\n")
+            log_file.write(f"Total: {len(records)}\n")
+        
+        # Show final report
+        print("\n" + "=" * 70)
+        print("ROLLBACK COMPLETE")
+        print("=" * 70)
+        print(f"Exchange: {self.exchange}")
+        print(f"Records processed: {len(records)}")
+        print(f"Successful: {success_count}")
+        print(f"Errors: {error_count}")
+        print(f"\nLog saved to: {log_filename}")
+        print(f"\nStatus: Records rolled back to VALIDATING")
+        print("=" * 70)
+        
+        return EXIT_SUCCESS if error_count == 0 else EXIT_VALIDATION_FAILED
+
     def process_folder(self) -> int:
         """Process all files in the exchange folder"""
         from pathlib import Path
@@ -738,6 +1000,8 @@ class IPOProcessor:
         # Process each file
         success_count = 0
         error_count = 0
+        finalized_count = 0
+        not_finalized_count = 0
 
         for pdf_file in pdf_files:
             print(f"\n{'='*70}")
@@ -755,6 +1019,8 @@ class IPOProcessor:
                 verbose=self.verbose,
                 GEMAPPROVED=self.gemini_approved,
                 movefiles=self.movefiles,
+                rollback=False,  # [ROLLBACK 2026-03-09] Not in rollback mode
+                uniqueSymbol=None,  # [ROLLBACK 2026-03-09] Not used in folder mode
                 manual_override=None,
                 reason=None
             )
@@ -764,8 +1030,14 @@ class IPOProcessor:
 
             if exit_code == EXIT_SUCCESS:
                 success_count += 1
+                # Check if file was finalized
+                if processor.all_rules_passed and processor.processing_log_id and processor.movefiles:
+                    finalized_count += 1
+                else:
+                    not_finalized_count += 1
             else:
                 error_count += 1
+                not_finalized_count += 1
 
         # Print folder summary
         print(f"\n{'='*70}")
@@ -774,12 +1046,19 @@ class IPOProcessor:
         print(f"Total files: {len(pdf_files)}")
         print(f"  ✓ Success: {success_count}")
         print(f"  ✗ Errors:  {error_count}")
+        print(f"\nFinalization Status:")
+        print(f"  ✓ Finalized: {finalized_count}")
+        print(f"  ⊗ Not Finalized: {not_finalized_count}")
         print('='*70)
 
         return EXIT_SUCCESS
 
     def process(self) -> int:
         """Main processing pipeline"""
+        # Check if rollback mode
+        if self.rollback:
+            return self.rollback_processing()
+        
         self.print_header()
 
         step_num = 1
@@ -865,6 +1144,10 @@ Examples:
   # Process all files in exchange folder
   python app_new.py --bse --dryrun
   python app_new.py --nse
+
+  # Rollback finalized files (requires double confirmation)
+  python app_new.py --rollback --nse --uniqueSymbol AAKAAR
+  python app_new.py --rollback --bse
         """
     )
 
@@ -876,6 +1159,12 @@ Examples:
     exchange_group = parser.add_mutually_exclusive_group(required=True)
     exchange_group.add_argument('--nse', action='store_true', help='Process NSE exchange')
     exchange_group.add_argument('--bse', action='store_true', help='Process BSE exchange')
+    
+    # Rollback mode (mutually exclusive with normal processing)
+    parser.add_argument('--rollback', action='store_true',
+                       help='Rollback finalized files (requires double confirmation)')
+    parser.add_argument('--uniqueSymbol', type=str,
+                       help='Target specific symbol for rollback (e.g., AAKAAR)')
 
     # Processing flags
     parser.add_argument('--GEMAPPROVED', action='store_true',

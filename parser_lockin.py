@@ -482,6 +482,9 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None) -> 
 
     # Store declared_total from parsing result (if extracted from TOTAL line)
     lockin_data.declared_total = result.get('declared_total')
+    
+    # [STRATEGY-TRACKING 2026-03-09] Store which strategy was used
+    lockin_data.strategy = result.get('strategy')
 
     # Compute totals
     lockin_data.compute_totals()

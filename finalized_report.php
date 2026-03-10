@@ -1161,6 +1161,12 @@ try {
         <option value="free">Free</option>
       </select>
     </label>
+    <label>Hide Blank TXT
+      <span style="display: inline-flex; gap: 8px; align-items: center;">
+        <input type="checkbox" id="hide-blank-lockin" value="1"> LockIn
+        <input type="checkbox" id="hide-blank-shp" value="1"> SHP
+      </span>
+    </label>
     <label>Sort
       <select id="sort-by">
         <option value="listing_date_actual" selected>Listing Date ↓</option>
@@ -1485,6 +1491,8 @@ try {
       const finalizedFilter = document.getElementById('filter-finalized').value;
       const bucket = document.getElementById('filter-bucket').value;
       const sortBy = document.getElementById('sort-by').value;
+      const hideBlankLockin = document.getElementById('hide-blank-lockin').checked;
+      const hideBlankShp = document.getElementById('hide-blank-shp').checked;
 
       let scrips = allScrips.filter(s => {
         if (q) {
@@ -1495,6 +1503,11 @@ try {
         if (exch && (s.exchange || '').toUpperCase() !== exch) return false;
         if (finalizedFilter !== '' && String(s.finalized ? 1 : 0) !== finalizedFilter) return false;
         if (bucket && !(s.rows || []).some(r => (r.lock_bucket || '').toLowerCase() === bucket)) return false;
+        
+        // [BLANK-TXT 2026-03-09] Hide blank TXT files
+        if (hideBlankLockin && s.error_message && s.error_message.includes('Blank lock-in')) return false;
+        if (hideBlankShp && s.error_message && s.error_message.includes('Blank SHP')) return false;
+        
         return true;
       });
 
@@ -1633,6 +1646,14 @@ try {
       const el = document.getElementById(id);
       if (el) {
         el.addEventListener('input', render);
+        el.addEventListener('change', render);
+      }
+    });
+    
+    // [BLANK-TXT 2026-03-09] Add event listeners for blank TXT checkboxes
+    ['hide-blank-lockin', 'hide-blank-shp'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
         el.addEventListener('change', render);
       }
     });

@@ -147,6 +147,153 @@ def finalize_files(
         return False
 
 
+def rollback_file_move(dest_file: Path, original_dir: Path) -> Optional[Path]:
+    """
+    Move a file from finalized/ back to its original location
+    
+    Args:
+        dest_file: Path to file in finalized/ folder
+        original_dir: Original directory where file should be restored
+    
+    Returns:
+        Source path if successful, None otherwise
+    """
+    if not dest_file or not dest_file.exists():
+        return None
+    
+    # Create original directory if needed
+    original_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Move file back
+    source = original_dir / dest_file.name
+    
+    # If source already exists, remove it first
+    if source.exists():
+        source.unlink()
+    
+    shutil.move(str(dest_file), str(source))
+    
+    return source
+
+
+def rollback_files(
+    lockin_pdf: Optional[Path],
+    shp_pdf: Optional[Path],
+    lockin_txt_java: Optional[Path],
+    shp_txt_java: Optional[Path],
+    lockin_png: Optional[Path],
+    exchange: str,
+    processing_log_id: int,
+    dryrun: bool = False,
+    log_file=None
+) -> Tuple[bool, list]:
+    """
+    Reverse of finalize_files() - move files from finalized/ back to original locations
+    
+    Args:
+        lockin_pdf: Path to lock-in PDF in finalized/
+        shp_pdf: Path to SHP PDF in finalized/
+        lockin_txt_java: Path to lock-in TXT in finalized/
+        shp_txt_java: Path to SHP TXT in finalized/
+        lockin_png: Path to lock-in PNG in finalized/
+        exchange: BSE or NSE
+        processing_log_id: ID from ipo_processing_log
+        dryrun: If True, don't actually move files
+        log_file: Optional file object for logging
+    
+    Returns:
+        (success, list of restored files)
+    """
+    def log(msg):
+        """Helper to print and log"""
+        print(msg)
+        if log_file:
+            log_file.write(msg + '\n')
+    
+    if dryrun:
+        log("  [DRYRUN] Would restore files from finalized/ folders:")
+        files_to_show = [
+            ("Lock-in PDF", lockin_pdf),
+            ("SHP PDF", shp_pdf),
+            ("Lock-in TXT", lockin_txt_java),
+            ("SHP TXT", shp_txt_java),
+            ("Lock-in PNG", lockin_png),
+        ]
+        for label, path in files_to_show:
+            if path and path.exists():
+                log(f"    - {label}: {path.name}")
+        log("  [DRYRUN] Would update database status to VALIDATING")
+        return True, []
+    
+    # Define original directories
+    base = Path("downloads") / exchange.lower()
+    original_dirs = {
+        lockin_pdf: base / "pdf" / "lockin",
+        shp_pdf: base / "pdf" / "shp",
+        lockin_txt_java: base / "pdf" / "lockin" / "txt",
+        shp_txt_java: base / "pdf" / "shp" / "txt",
+        lockin_png: base / "pdf" / "lockin" / "png",
+    }
+    
+    files_to_restore = [
+        ("Lock-in PDF", lockin_pdf),
+        ("SHP PDF", shp_pdf),
+        ("Lock-in TXT", lockin_txt_java),
+        ("SHP TXT", shp_txt_java),
+        ("Lock-in PNG", lockin_png),
+    ]
+    
+    restored_files: List[Path] = []
+    
+    try:
+        # Restore all files
+        for label, dest_file in files_to_restore:
+            if dest_file and dest_file.exists():
+                original_dir = original_dirs.get(dest_file)
+                if original_dir:
+                    source = rollback_file_move(dest_file, original_dir)
+                    if source:
+                        restored_files.append(source)
+                        log(f"  ✓ Restored: {source.name}")
+                    else:
+                        log(f"  ✗ Failed to restore: {label}")
+                else:
+                    log(f"  ✗ Unknown original directory for: {label}")
+            else:
+                log(f"  ⊗ Not in finalized/: {label} (may not have been finalized)")
+        
+        # Update database status
+        from database import mark_unfinalized
+        if not mark_unfinalized(processing_log_id):
+            raise Exception("Failed to update database status")
+        
+        log(f"  ✓ Database updated: FINALIZED → VALIDATING")
+        
+        return True, restored_files
+        
+    except Exception as e:
+        # Log error but don't rollback (user can re-run rollback)
+        log(f"  ✗ ERROR during rollback: {e}")
+        log(f"  ⚠ Some files may have been restored. Re-run rollback to continue.")
+        return False, restored_files
+
+
+def check_can_rollback(status: str) -> Tuple[bool, str]:
+    """
+    Check if file can be rollbacked
+    
+    Args:
+        status: Current processing status
+    
+    Returns:
+        (can_rollback, reason)
+    """
+    if status != 'FINALIZED':
+        return False, f"Cannot rollback: status is '{status}' (must be FINALIZED)"
+    
+    return True, "Ready for rollback"
+
+
 def check_can_finalize(all_rules_passed: bool, status: str) -> Tuple[bool, str]:
     """
     Check if file can be finalized

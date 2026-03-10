@@ -73,14 +73,20 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
         processing_log_id or None on failure
     """
     # Prepare validation_results JSON
+    from validator import get_extraction_strategies
+    strategies = get_extraction_strategies(status.lockin_data, status.shp_data)
+    
     validation_json = json.dumps({
-        v.rule_id: {
-            'passed': v.passed,
-            'message': v.message,
-            'expected': v.expected,
-            'actual': v.actual,
-        }
-        for v in status.validations
+        **{
+            v.rule_id: {
+                'passed': v.passed,
+                'message': v.message,
+                'expected': v.expected,
+                'actual': v.actual,
+            }
+            for v in status.validations
+        },
+        '_strategies': strategies,  # [STRATEGY-TRACKING 2026-03-09]
     })
 
     # Get failed rules
@@ -264,6 +270,28 @@ def mark_finalized(processing_log_id: int) -> bool:
     return db.execute_transaction(operations)
 
 
+def mark_unfinalized(processing_log_id: int) -> bool:
+    """
+    Mark processing as un-finalized (rollback)
+    
+    Reverse of mark_finalized() - sets status back to VALIDATING
+    
+    Args:
+        processing_log_id: ID from ipo_processing_log
+    
+    Returns:
+        True if successful
+    """
+    sql = """
+        UPDATE ipo_processing_log
+        SET status = 'VALIDATING', finalized_at = NULL
+        WHERE id = %s
+    """
+    
+    operations = [(sql, (processing_log_id,))]
+    return db.execute_transaction(operations)
+
+
 def mark_failed(unique_symbol: str, exchange: str, error_message: str) -> bool:
     """
     Mark processing as failed
@@ -311,6 +339,35 @@ def get_processing_status(unique_symbol: str) -> Optional[Dict[str, Any]]:
     """
 
     return db.execute_query(sql, (unique_symbol,), fetch="one")
+
+
+def get_finalized_records(exchange: str, unique_symbol: Optional[str] = None) -> list:
+    """
+    Get finalized processing records for rollback
+    
+    Args:
+        exchange: BSE or NSE
+        unique_symbol: Optional specific symbol to filter
+    
+    Returns:
+        List of dictionaries with processing records
+    """
+    if unique_symbol:
+        sql = """
+            SELECT *
+            FROM ipo_processing_log
+            WHERE exchange = %s AND unique_symbol = %s AND status = 'FINALIZED'
+            ORDER BY processed_at DESC
+        """
+        return db.execute_query(sql, (exchange, unique_symbol), fetch="all")
+    else:
+        sql = """
+            SELECT *
+            FROM ipo_processing_log
+            WHERE exchange = %s AND status = 'FINALIZED'
+            ORDER BY processed_at DESC
+        """
+        return db.execute_query(sql, (exchange,), fetch="all")
 
 
 def main():

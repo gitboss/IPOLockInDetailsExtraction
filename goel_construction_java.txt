@@ -1,0 +1,17 @@
+--- PAGE 1 ---
+                                              Goel Construction Company Limited 
+                         Distinctive numbers range                                                           Lock-in Date
+            Number of Type of Security (F- Fully Paid, P – Partly Paid, L – 
+                                                                                                                                Physical/ Demat
+             securities       From          To                          Lock –in etc)                       From       To
+             33,000.00                        1            33,000  L 02-Sep-25  08-Sep-27       Demat
+           10,41,600.00             33,001       10,74,600  L 02-Sep-25  08-Sep-26       Demat
+           37,82,940.00        10,74,601       48,57,540  L 03-Sep-25  08-Sep-26       Demat
+           28,94,140.00        48,57,541       77,51,680  L 03-Sep-25  08-Sep-27       Demat
+           28,89,920.00        77,51,681    1,06,41,600  L 03-Sep-25  08-Sep-28       Demat
+             5,30,400       1,06,41,601    1,11,72,000  L 05-Sep-25  04-Oct-25       Demat
+             5,31,600       1,11,72,001 1,17,03,600                          L 05-Sep-25  03-Dec-25       Demat
+             27,46,000       1,17,03,601 1,44,49,600                          F Free Demat
+            1,44,49,600
+
+######################
