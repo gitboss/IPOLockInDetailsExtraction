@@ -1587,16 +1587,16 @@ def extract_shp_using_position_from_total(
     print(f"    [POSITION-FALLBACK] Extracted from position {share_position}: promoter={promoter}, public={public}, other={other}")
 
     # Validate: promoter + public + other should equal known_total
-    if promoter and public:
-        calc_sum = promoter + public + (other or 0)
-        sum_valid = (calc_sum == known_total)
+    # Use explicit None checks (0 is a valid share value and must not skip validation).
+    if promoter is None or public is None or other is None:
+        print("    [POSITION-FALLBACK] Validation failed: missing promoter/public/other value")
+        return None
 
-        if not sum_valid:
-            print(f"    [POSITION-FALLBACK] Validation failed: {calc_sum} != {known_total}")
-            return None
-    else:
-        sum_valid = None
-        calc_sum = None
+    calc_sum = promoter + public + other
+    sum_valid = (calc_sum == known_total)
+    if not sum_valid:
+        print(f"    [POSITION-FALLBACK] Validation failed: {calc_sum} != {known_total}")
+        return None
 
     print(f"    [POSITION-FALLBACK] OK Validation passed")
 

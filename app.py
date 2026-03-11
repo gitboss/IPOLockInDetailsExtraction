@@ -19,8 +19,9 @@ import sys
 import argparse
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 # Import extraction libraries
 try:
@@ -84,6 +85,7 @@ class IPOProcessor:
         self.rollback_unique_symbol = args.uniqueSymbol  # [ROLLBACK 2026-03-09] For rollback filter
         self.manual_override = (args.manual_override or "").split(",") if args.manual_override else []
         self.reason = args.reason
+        self.suppress_run_log = getattr(args, "suppress_run_log", False)
 
         # File paths (will be set during validation)
         self.lockin_pdf_path = None
@@ -116,6 +118,7 @@ class IPOProcessor:
         self.all_rules_passed = False
         self.blank_shp_error = None  # Set if SHP file is blank
         self.blank_lockin_error = None  # Set if lock-in file is blank [BLANK-TXT 2026-03-09]
+        self.was_finalized = False  # True only when finalization actually succeeds (non-dry run)
 
     def print_header(self):
         """Print formatted header"""
@@ -147,6 +150,43 @@ class IPOProcessor:
         """Log a processing step"""
         prefix = "WOULD: " if self.dry_run and status == "⚙" else ""
         print(f"  {step_num}. {status} {prefix}{message}")
+
+    def get_run_symbol(self) -> str:
+        """Best-effort symbol label for run summary logs."""
+        if self.unique_symbol:
+            return self.unique_symbol
+        if self.exchange == "NSE" and self.symbol:
+            return f"NSE:{self.symbol}"
+        if self.exchange == "BSE" and self.code:
+            return f"BSE:{self.code}"
+        return self.file_name or "UNKNOWN"
+
+    def write_run_summary_log(self, finalized_symbols: List[str], not_finalized_symbols: List[str]):
+        """Write per-run summary log with finalized/not-finalized symbols."""
+        os.makedirs("logs", exist_ok=True)
+        ts = datetime.now()
+        filename = f"logs/process_run_{self.exchange}_{ts.strftime('%Y%m%d_%H%M%S')}.txt"
+
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write("===\n")
+            f.write(f"date time run: {ts.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"exchange: {self.exchange}\n")
+            f.write("\n")
+            f.write("finalized\n")
+            if finalized_symbols:
+                for sym in finalized_symbols:
+                    f.write(f"{sym}\n")
+            else:
+                f.write("(none)\n")
+            f.write("\n")
+            f.write("not finalized\n")
+            if not_finalized_symbols:
+                for sym in not_finalized_symbols:
+                    f.write(f"{sym}\n")
+            else:
+                f.write("(none)\n")
+
+        print(f"\nRun summary log saved: {filename}")
 
     def parse_filename(self) -> Tuple[Optional[str], Optional[str]]:
         """
@@ -760,6 +800,7 @@ class IPOProcessor:
         if success:
             if not self.dry_run:
                 self.log_step(step_num, "✓", "Files moved to finalized/ and database updated")
+                self.was_finalized = True
             else:
                 self.log_step(step_num, "✓", "Finalization preview shown (dry-run)")
         else:
@@ -1002,6 +1043,8 @@ class IPOProcessor:
         error_count = 0
         finalized_count = 0
         not_finalized_count = 0
+        finalized_symbols: List[str] = []
+        not_finalized_symbols: List[str] = []
 
         for pdf_file in pdf_files:
             print(f"\n{'='*70}")
@@ -1022,22 +1065,27 @@ class IPOProcessor:
                 rollback=False,  # [ROLLBACK 2026-03-09] Not in rollback mode
                 uniqueSymbol=None,  # [ROLLBACK 2026-03-09] Not used in folder mode
                 manual_override=None,
-                reason=None
+                reason=None,
+                suppress_run_log=True,
             )
 
             processor = IPOProcessor(args)
             exit_code = processor.process()
+            symbol_label = processor.get_run_symbol()
 
             if exit_code == EXIT_SUCCESS:
                 success_count += 1
                 # Check if file was finalized
-                if processor.all_rules_passed and processor.processing_log_id and processor.movefiles:
+                if processor.was_finalized:
                     finalized_count += 1
+                    finalized_symbols.append(symbol_label)
                 else:
                     not_finalized_count += 1
+                    not_finalized_symbols.append(symbol_label)
             else:
                 error_count += 1
                 not_finalized_count += 1
+                not_finalized_symbols.append(symbol_label)
 
         # Print folder summary
         print(f"\n{'='*70}")
@@ -1050,6 +1098,9 @@ class IPOProcessor:
         print(f"  ✓ Finalized: {finalized_count}")
         print(f"  ⊗ Not Finalized: {not_finalized_count}")
         print('='*70)
+
+        if not self.suppress_run_log:
+            self.write_run_summary_log(finalized_symbols, not_finalized_symbols)
 
         return EXIT_SUCCESS
 
@@ -1128,6 +1179,13 @@ class IPOProcessor:
         elif not self.all_rules_passed:
             print("\nWARN Fix validation issues before finalization")
 
+        if not self.suppress_run_log:
+            symbol_label = self.get_run_symbol()
+            if self.was_finalized:
+                self.write_run_summary_log([symbol_label], [])
+            else:
+                self.write_run_summary_log([], [symbol_label])
+
         return EXIT_SUCCESS
 
 
@@ -1192,7 +1250,16 @@ Examples:
 
     # Run processor
     processor = IPOProcessor(args)
-    exit_code = processor.process()
+    try:
+        exit_code = processor.process()
+    except SystemExit as e:
+        # Ensure failed runs also get a summary log (unless rollback/suppressed).
+        code = e.code if isinstance(e.code, int) else EXIT_VALIDATION_FAILED
+        if not processor.rollback and not processor.suppress_run_log:
+            symbol_label = processor.get_run_symbol()
+            processor.write_run_summary_log([], [symbol_label])
+        sys.exit(code)
+
     sys.exit(exit_code)
 
 
