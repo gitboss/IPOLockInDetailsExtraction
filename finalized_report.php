@@ -1585,7 +1585,15 @@ try {
       }
 
       // PNG
-      _pngFiles = Array.isArray(s.png_files) ? s.png_files.map(p => p.replace(/\\/g, '/')) : [];
+      _pngFiles = Array.isArray(s.png_files)
+        ? s.png_files.map(p => {
+          let np = normalizeWebPath(p || '');
+          if (s.finalized && np) {
+            np = np.replace(/\/pdf\/lockin\/png\//, '/pdf/lockin/png/finalized/');
+          }
+          return np;
+        }).filter(Boolean)
+        : [];
       _pngIdx = 0;
       updatePng();
     }
