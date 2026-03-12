@@ -19,6 +19,8 @@ import sys
 import argparse
 import re
 import subprocess
+import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -49,8 +51,14 @@ from parser_lockin import parse_lockin_file
 from parser_shp import parse_shp_file
 from text_utils import is_blank_text_file, get_blank_file_stats
 from validator import validate_all_rules
-from database import get_master_data, save_processing_log, update_processing_log_error
-from models import ProcessingStatus
+from database import (
+    get_master_data,
+    save_processing_log,
+    update_processing_log_error,
+    get_persisted_bucket_issues,
+    update_processing_validation_state,
+)
+from models import ProcessingStatus, ValidationResult
 from finalizer import finalize_files, check_can_finalize
 
 # Exit Codes
@@ -219,6 +227,15 @@ class IPOProcessor:
             print("   Please specify a filename for now.")
             sys.exit(EXIT_SUCCESS)
 
+        # NSE ZIP bridge:
+        # Input: CML{nnnnn}.pdf
+        # Source ZIP: downloads/nse/zip/CML{nnnnn}.zip
+        # Extract to:
+        #   lock-in -> downloads/nse/pdf/lockin/{SYMBOL}-CML{nnnnn}.pdf
+        #   SHP     -> downloads/nse/pdf/shp/SHP-{SYMBOL}.pdf
+        if self.exchange == "NSE":
+            step_num = self.prepare_nse_zip_input(step_num)
+
         # Build paths based on exchange
         ex_config = EXCHANGES[self.exchange]
         ex_lower = self.exchange.lower()
@@ -283,6 +300,106 @@ class IPOProcessor:
         self.log_step(step_num, "✓", f"SHP PDF found: {self.shp_pdf_path.relative_to(BASE_DIR)}")
         step_num += 1
         self.log_step(step_num, "✓", f"Parsed symbol: {self.unique_symbol}")
+        step_num += 1
+
+        return step_num
+
+    def prepare_nse_zip_input(self, step_num: int) -> int:
+        """
+        NSE-only pre-processing:
+        If user passes CML{nnnnn}.zip or CML{nnnnn}.pdf, extract matching ZIP and rename outputs.
+        """
+        input_name = Path(self.file_name).name if self.file_name else ""
+        m = re.match(r'^(CML(\d+)\.(zip|pdf))$', input_name, flags=re.IGNORECASE)
+        if not m:
+            return step_num
+
+        cml_pdf_name = f"CML{m.group(2)}.pdf"
+        cml_number = m.group(2)
+        ext = m.group(3).lower()
+        zip_dir = DOWNLOADS_DIR / "nse" / "zip"
+        # If user passed an explicit ZIP path, respect it; otherwise use downloads/nse/zip
+        if ext == "zip":
+            provided = Path(self.file_name)
+            if provided.is_absolute() or str(provided.parent) not in ("", "."):
+                zip_path = provided
+            else:
+                zip_path = zip_dir / input_name
+        else:
+            zip_path = zip_dir / f"CML{cml_number}.zip"
+        done_dir = zip_dir / "done_extraction"
+
+        self.log_step(step_num, "⚙", f"NSE ZIP mode detected for CML{cml_number}")
+        step_num += 1
+
+        if not zip_path.exists():
+            print(f"\n❌ ZIP file not found for NSE extraction: {zip_path}")
+            sys.exit(EXIT_FILE_NOT_FOUND)
+
+        lock_member = None
+        shp_member = None
+        symbol = None
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for member in zf.infolist():
+                    base = Path(member.filename).name
+                    if not base:
+                        continue
+
+                    if base.upper() == cml_pdf_name.upper():
+                        lock_member = member.filename
+                        continue
+
+                    shp_match = re.match(r'^SHP[_-](.+)\.pdf$', base, flags=re.IGNORECASE)
+                    if shp_match and shp_member is None:
+                        shp_member = member.filename
+                        symbol = shp_match.group(1)
+
+                if not lock_member:
+                    print(f"\n❌ Lock-in PDF {cml_pdf_name} not found inside ZIP: {zip_path.name}")
+                    sys.exit(EXIT_FILE_NOT_FOUND)
+
+                if not shp_member or not symbol:
+                    print(f"\n❌ SHP PDF not found inside ZIP: expected SHP_{{SYMBOL}}.pdf")
+                    sys.exit(EXIT_FILE_NOT_FOUND)
+
+                symbol = re.sub(r'[<>:\"/\\|?*]', '', symbol).strip()
+                if not symbol:
+                    print("\n❌ Could not derive valid SYMBOL from SHP filename inside ZIP")
+                    sys.exit(EXIT_VALIDATION_FAILED)
+
+                lockin_out_name = f"{symbol}-CML{cml_number}.pdf"
+                shp_out_name = f"SHP-{symbol}.pdf"
+                lockin_out_path = DOWNLOADS_DIR / "nse" / "pdf" / "lockin" / lockin_out_name
+                shp_out_path = DOWNLOADS_DIR / "nse" / "pdf" / "shp" / shp_out_name
+
+                lockin_out_path.parent.mkdir(parents=True, exist_ok=True)
+                shp_out_path.parent.mkdir(parents=True, exist_ok=True)
+                done_dir.mkdir(parents=True, exist_ok=True)
+
+                with zf.open(lock_member) as src, open(lockin_out_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                with zf.open(shp_member) as src, open(shp_out_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+        except zipfile.BadZipFile:
+            print(f"\n❌ Invalid ZIP file: {zip_path}")
+            sys.exit(EXIT_PARSE_ERROR)
+        except Exception as e:
+            print(f"\n❌ ZIP extraction failed: {e}")
+            sys.exit(EXIT_PARSE_ERROR)
+
+        done_target = done_dir / zip_path.name
+        if done_target.exists():
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            done_target = done_dir / f"{zip_path.stem}_{ts}{zip_path.suffix}"
+        shutil.move(str(zip_path), str(done_target))
+
+        self.file_name = lockin_out_name
+        self.log_step(step_num, "✓", f"ZIP extracted: lock-in={lockin_out_name}, shp={shp_out_name}")
+        step_num += 1
+        self.log_step(step_num, "✓", f"Moved ZIP to done_extraction: {done_target.name}")
         step_num += 1
 
         return step_num
@@ -672,8 +789,22 @@ class IPOProcessor:
                 self.shp_data,
                 self.declared_total,
                 self.anchor_letter_url,
-                parsed_declared_total=self.lockin_data.declared_total if self.lockin_data else None
+                parsed_declared_total=self.lockin_data.declared_total if self.lockin_data else None,
+                allotment_date=self.allotment_date
             )
+
+            # Apply manual overrides (if requested)
+            if self.manual_override:
+                override_ids = {r.strip().upper() for r in self.manual_override if r.strip()}
+                for validation in self.validations:
+                    if validation.rule_id.upper() in override_ids:
+                        if validation.can_override and not validation.passed:
+                            validation.passed = True
+                            validation.overridden = True
+                            validation.override_reason = self.reason
+                            validation.message += f" | MANUAL_OVERRIDE: {self.reason}"
+                        elif not validation.can_override:
+                            print(f"\n⚠️  Manual override ignored for {validation.rule_id}: rule is not overrideable")
 
             # Check results
             passed_count = sum(1 for v in self.validations if v.passed)
@@ -726,13 +857,81 @@ class IPOProcessor:
 
         if processing_log_id:
             self.processing_log_id = processing_log_id  # Store for finalization
+            post_save_issues = self.apply_post_save_validation_checks()
             self.log_step(step_num, "✓", f"Saved to database (ID={processing_log_id})")
+            if post_save_issues:
+                self.log_step(
+                    step_num,
+                    "⚠️",
+                    f"Post-save validation failed: {post_save_issues} locked row(s) have blank/invalid persisted bucket"
+                )
         else:
             print("\nERROR saving to database")
             sys.exit(EXIT_DB_ERROR)
 
         step_num += 1
         return step_num
+
+    def apply_post_save_validation_checks(self) -> int:
+        """
+        Run DB-persistence checks after rows are inserted.
+        Adds validation failure (no abort) so finalization is blocked clearly.
+        """
+        if self.no_db or self.dry_run or not self.processing_log_id:
+            return 0
+
+        issues = get_persisted_bucket_issues(self.processing_log_id)
+        if not issues:
+            return 0
+
+        legacy_values = {"3+YEARS", "2+YEARS", "1+YEAR", "ANCHOR_90DAYS", "ANCHOR_30DAYS", "FREE"}
+        legacy_rows = [r for r in issues if (r.get("bucket") or "") in legacy_values]
+        blank_rows = [r for r in issues if (r.get("bucket") is None or str(r.get("bucket")) == "")]
+        other_rows = [r for r in issues if r not in legacy_rows and r not in blank_rows]
+
+        preview = "; ".join(
+            f"row#{(r.get('row_order') or 0) + 1} shares={int(r.get('shares') or 0):,} bucket='{r.get('bucket') or ''}'"
+            for r in issues[:5]
+        )
+        more = f" (+{len(issues) - 5} more)" if len(issues) > 5 else ""
+        issue_parts = []
+        if legacy_rows:
+            issue_parts.append(f"legacy-enum={len(legacy_rows)}")
+        if blank_rows:
+            issue_parts.append(f"blank={len(blank_rows)}")
+        if other_rows:
+            issue_parts.append(f"unknown={len(other_rows)}")
+        issue_breakdown = ", ".join(issue_parts) if issue_parts else "unknown"
+        msg = (
+            f"Persisted bucket validation failed: {len(issues)} locked row(s) have non-canonical DB bucket values "
+            f"in ipo_lockin_rows.bucket ({issue_breakdown}). "
+            f"These rows cannot be trusted for finalization until schema/data is corrected. {preview}{more}"
+        )
+
+        # Replace any prior instance of this post-save rule to keep output stable.
+        self.validations = [v for v in self.validations if v.rule_id != "RULE9_DB_BUCKET"]
+        self.validations.append(
+            ValidationResult(
+                rule_id="RULE9_DB_BUCKET",
+                passed=False,
+                message=msg,
+                expected=0,
+                actual=len(issues),
+                can_override=False,
+            )
+        )
+        self.all_rules_passed = all(v.passed for v in self.validations)
+
+        updated = update_processing_validation_state(
+            self.processing_log_id,
+            self.validations,
+            self.all_rules_passed,
+            lockin_data=self.lockin_data,
+            shp_data=self.shp_data,
+        )
+        if not updated:
+            print("\n⚠️  Warning: Could not persist post-save validation updates to DB")
+        return len(issues)
 
     def finalize_processing(self, step_num: int) -> int:
         """Finalize files by moving to finalized/ folders"""

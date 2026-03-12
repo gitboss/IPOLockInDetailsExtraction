@@ -89,6 +89,15 @@ def parse_date_str(date_str: str) -> str:
     # Match patterns like "28th November 2025" -> "28 November 2025"
     cleaned_date = re.sub(r'(\d{1,2})(?:st|nd|rd|th)\b', r'\1', cleaned_date)
 
+    # Preserve ambiguous numeric dates (e.g., 12/11/2028) for contextual parsing later.
+    # Unambiguous numeric dates (e.g., 11/28/2025) are still parsed below.
+    amb = re.match(r'^\s*(\d{1,2})[-/\.](\d{1,2})[-/\.](\d{2,4})\s*$', cleaned_date)
+    if amb:
+        first = int(amb.group(1))
+        second = int(amb.group(2))
+        if first <= 12 and second <= 12:
+            return cleaned_date.strip()
+
     # Try various date formats
     formats = [
         '%d/%m/%Y',      # 15/01/2025

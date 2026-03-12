@@ -4,7 +4,7 @@ Implements RULE1-RULE10 for lock-in and SHP data validation
 """
 
 from typing import List
-from models import LockinData, SHPData, ValidationResult
+from models import LockinData, SHPData, ValidationResult, LockBucket, RowStatus
 
 
 def validate_rule1(lockin: LockinData) -> ValidationResult:
@@ -249,6 +249,112 @@ def validate_rule6(lockin: LockinData, anchor_letter_url: str) -> ValidationResu
     )
 
 
+def validate_rule7_bucket_calculated(lockin: LockinData) -> ValidationResult:
+    """
+    RULE 7: Bucket must be calculated for locked rows with lock-in upto date.
+    """
+    bad_rows = []
+    for idx, row in enumerate(lockin.rows, start=1):
+        if row.status == RowStatus.LOCKED and row.lockin_date_to is not None:
+            if row.bucket == LockBucket.FREE:
+                bad_rows.append((idx, row.shares, row.lockin_date_from, row.lockin_date_to))
+
+    passed = len(bad_rows) == 0
+    if passed:
+        message = "All locked rows with lock-in dates have non-free buckets"
+    else:
+        preview = "; ".join(
+            f"row#{i} shares={s:,} from={f} to={t}"
+            for i, s, f, t in bad_rows[:5]
+        )
+        more = f" (+{len(bad_rows)-5} more)" if len(bad_rows) > 5 else ""
+        message = f"Found {len(bad_rows)} locked row(s) with lock-in date but bucket=free: {preview}{more}"
+
+    return ValidationResult(
+        rule_id="RULE7",
+        passed=passed,
+        message=message,
+        expected=0,
+        actual=len(bad_rows),
+        can_override=False,
+    )
+
+
+def validate_rule8_negative_days(lockin: LockinData, allotment_date=None) -> ValidationResult:
+    """
+    RULE 8: Negative lock period is invalid (manual override allowed).
+    """
+    bad_rows = []
+    for idx, row in enumerate(lockin.rows, start=1):
+        if row.status != RowStatus.LOCKED or row.lockin_date_to is None:
+            continue
+        start_date = row.lockin_date_from if row.lockin_date_from is not None else allotment_date
+        if start_date is None:
+            continue
+        days = (row.lockin_date_to - start_date).days
+        if days < 0:
+            start_source = "lock_from" if row.lockin_date_from is not None else "allotment"
+            bad_rows.append((idx, row.shares, start_date, row.lockin_date_to, days, start_source))
+
+    passed = len(bad_rows) == 0
+    if passed:
+        message = "No negative lock-period rows found"
+    else:
+        preview = "; ".join(
+            f"row#{i} shares={s:,} start({src})={f} to={t} days={d}"
+            for i, s, f, t, d, src in bad_rows[:5]
+        )
+        more = f" (+{len(bad_rows)-5} more)" if len(bad_rows) > 5 else ""
+        message = f"Found {len(bad_rows)} row(s) with negative lock period: {preview}{more}"
+
+    return ValidationResult(
+        rule_id="RULE8",
+        passed=passed,
+        message=message,
+        expected=0,
+        actual=len(bad_rows),
+        can_override=True,  # Explicitly overrideable for rare date/OCR edge cases
+    )
+
+
+def validate_rule10_locked_rows_have_valid_upto(lockin: LockinData) -> ValidationResult:
+    """
+    RULE 10: Every LOCKED row must have a parseable lock-in upto date.
+
+    Prevents false finalization when OCR/date typos produce locked rows with no
+    lockin_date_to (e.g., "Juny 19, 2028").
+    """
+    bad_rows = []
+    for idx, row in enumerate(lockin.rows, start=1):
+        if row.status != RowStatus.LOCKED:
+            continue
+        if row.lockin_date_to is None:
+            bad_rows.append((idx, row.shares, row.security_type, row.share_form))
+
+    passed = len(bad_rows) == 0
+    if passed:
+        message = "All locked rows have valid lock-in upto dates"
+    else:
+        preview = "; ".join(
+            f"row#{i} shares={s:,} type={t or '-'} form={f or '-'}"
+            for i, s, t, f in bad_rows[:5]
+        )
+        more = f" (+{len(bad_rows)-5} more)" if len(bad_rows) > 5 else ""
+        message = (
+            f"Found {len(bad_rows)} locked row(s) with missing/invalid lock-in upto date: "
+            f"{preview}{more}"
+        )
+
+    return ValidationResult(
+        rule_id="RULE10",
+        passed=passed,
+        message=message,
+        expected=0,
+        actual=len(bad_rows),
+        can_override=False,
+    )
+
+
 def validate_all_rules(
     lockin: LockinData,
     shp: SHPData,
@@ -256,10 +362,11 @@ def validate_all_rules(
     anchor_letter_url: str = None,
     db_computed_total: int = None,
     db_declared_total: int = None,
-    parsed_declared_total: int = None
+    parsed_declared_total: int = None,
+    allotment_date=None
 ) -> List[ValidationResult]:
     """
-    Run all validation rules (RULE1-RULE6)
+    Run all validation rules (RULE1-RULE10 except post-save DB rule)
 
     Args:
         lockin: Lock-in extraction data
@@ -296,7 +403,13 @@ def validate_all_rules(
     # Anchor validation
     results.append(validate_rule6(lockin, anchor_letter_url))
 
-    # Note: RULE7-RULE10 are for GEMINI extraction (Step 5)
+    # Additional lock-in integrity rules
+    results.append(validate_rule7_bucket_calculated(lockin))
+    results.append(validate_rule8_negative_days(lockin, allotment_date=allotment_date))
+    results.append(validate_rule10_locked_rows_have_valid_upto(lockin))
+
+    # Note: RULE9_DB_BUCKET is post-save DB persistence check in app.py
+    # Note: Additional GEMINI-specific rules are Step 5
     # Will be implemented when --GEMAPPROVED flag is used
 
     return results

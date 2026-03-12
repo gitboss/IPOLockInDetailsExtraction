@@ -90,8 +90,8 @@ CREATE TABLE IF NOT EXISTS ipo_lockin_rows (
     share_form VARCHAR(100),
 
     -- Status and bucket
-    status ENUM('LOCKED', 'FREE') NOT NULL DEFAULT 'FREE',
-    bucket ENUM('3+YEARS', '2+YEARS', '1+YEAR', 'ANCHOR_90DAYS', 'ANCHOR_30DAYS', 'FREE') DEFAULT 'FREE',
+    status ENUM('LOCKED', 'FREE') NOT NULL,
+    bucket ENUM('3_year_plus', '2_year_plus', '1_year_plus', '1_year_minus', 'anchor_90', 'anchor_30', 'free') DEFAULT 'free',
 
     -- Row order (for maintaining original sequence)
     row_order INT,

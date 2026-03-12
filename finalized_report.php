@@ -1255,6 +1255,34 @@ try {
       return map[bucket.toLowerCase()] || bucket;
     }
 
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderFinalizationIssue(s) {
+      if (!s.error_message) return '';
+      const raw = String(s.error_message);
+      const parts = raw.split('|').map(p => p.trim()).filter(Boolean);
+      const body = parts.length > 1
+        ? `<ul style="margin:6px 0 0 16px;padding:0">${parts.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>`
+        : `<div style="margin-top:6px">${escapeHtml(raw)}</div>`;
+
+      const bucketSchemaHint = raw.toLowerCase().includes('persisted bucket validation failed')
+        ? `<div style="margin-top:8px;font-weight:700;color:#991b1b">Action: DB bucket values are non-canonical. Apply bucket ENUM/data migration, then reprocess this symbol.</div>`
+        : '';
+
+      return `<div style="grid-column:1/-1;background:#451a1a;border:1px solid #991b1b;border-radius:6px;padding:8px 10px;margin-top:4px;font-size:11px;color:#fca5a5">
+        <strong>Finalization Failed</strong>
+        ${body}
+        ${bucketSchemaHint}
+      </div>`;
+    }
+
     function getEffectiveStatus(s) {
       return s.status || '';
     }
@@ -1291,11 +1319,7 @@ try {
         ? `<span class="match-ok">FINALIZED</span>`
         : `<span class="match-none">NOT FINALIZED</span>`;
 
-      const errorMessageStr = s.error_message
-        ? `<div style="grid-column:1/-1;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:6px 10px;margin-top:4px;font-size:11px;color:#856404">
-             <strong>⚠ Finalization Issue:</strong> ${s.error_message}
-           </div>`
-        : '';
+      const errorMessageStr = renderFinalizationIssue(s);
 
       const validStr = (() => {
         const st = effectiveStatus.toUpperCase();

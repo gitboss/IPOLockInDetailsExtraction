@@ -6,7 +6,7 @@ Reuses sme_ipo_master and sme_ipo_lockin_ocr tables
 
 import json
 from datetime import date, datetime
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from pathlib import Path
 
 from models import LockinData, SHPData, ValidationResult, ProcessingStatus
@@ -224,6 +224,76 @@ def save_lockin_rows(conn, processing_log_id: int, lockin_data: LockinData):
         cursor.execute(sql, params)
 
     cursor.close()
+
+
+def get_persisted_bucket_issues(processing_log_id: int) -> List[Dict[str, Any]]:
+    """
+    Find locked rows whose persisted bucket is blank/invalid in DB.
+
+    This catches schema mismatches (e.g., ENUM coercing unknown values to '').
+    """
+    sql = """
+        SELECT
+            row_order, shares, status, bucket, lockin_date_from, lockin_date_to
+        FROM ipo_lockin_rows
+        WHERE processing_log_id = %s
+          AND status = 'LOCKED'
+          AND lockin_date_to IS NOT NULL
+          AND (
+                bucket IS NULL
+                OR bucket = ''
+                OR LOWER(bucket) NOT IN (
+                    '3_year_plus',
+                    '2_year_plus',
+                    '1_year_plus',
+                    '1_year_minus',
+                    'anchor_90',
+                    'anchor_30'
+                )
+          )
+        ORDER BY row_order
+    """
+    rows = db.execute_query(sql, (processing_log_id,), fetch="all")
+    return rows or []
+
+
+def update_processing_validation_state(
+    processing_log_id: int,
+    validations: List[ValidationResult],
+    all_rules_passed: bool,
+    lockin_data: Optional[LockinData] = None,
+    shp_data: Optional[SHPData] = None
+) -> bool:
+    """
+    Update validation JSON + pass/fail flags after post-save checks.
+    """
+    from validator import get_extraction_strategies
+
+    strategies = get_extraction_strategies(lockin_data, shp_data)
+    validation_json = json.dumps({
+        **{
+            v.rule_id: {
+                'passed': v.passed,
+                'message': v.message,
+                'expected': v.expected,
+                'actual': v.actual,
+            }
+            for v in validations
+        },
+        '_strategies': strategies,
+    })
+
+    failed_rules = ','.join([v.rule_id for v in validations if not v.passed]) or None
+
+    sql = """
+        UPDATE ipo_processing_log
+        SET validation_results = %s,
+            all_rules_passed = %s,
+            failed_rules = %s
+        WHERE id = %s
+    """
+    operations = [(sql, (validation_json, all_rules_passed, failed_rules, processing_log_id))]
+    return db.execute_transaction(operations)
 
 
 def update_processing_log_error(processing_log_id: int, error_message: str) -> bool:

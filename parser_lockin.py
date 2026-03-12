@@ -76,6 +76,15 @@ def parse_date_str(date_str: str) -> str:
     # Match patterns like "28th November 2025" -> "28 November 2025"
     cleaned_date = re.sub(r'(\d{1,2})(?:st|nd|rd|th)\b', r'\1', cleaned_date)
 
+    # Preserve ambiguous numeric dates (e.g., 12/11/2028) for contextual parsing later.
+    # Unambiguous numeric dates (e.g., 11/28/2025) are still parsed below.
+    amb = re.match(r'^\s*(\d{1,2})[-/\.](\d{1,2})[-/\.](\d{2,4})\s*$', cleaned_date)
+    if amb:
+        first = int(amb.group(1))
+        second = int(amb.group(2))
+        if first <= 12 and second <= 12:
+            return cleaned_date.strip()
+
     # Try various date formats
     formats = [
         '%d/%m/%Y',      # 15/01/2025
@@ -106,7 +115,7 @@ def parse_date_str(date_str: str) -> str:
     return date_str
 
 
-def parse_date(date_str: str) -> Optional[date]:
+def parse_date(date_str: str, date_order_hint: Optional[str] = None) -> Optional[date]:
     """
     Secondary date parser. Returns a datetime.date object (or None on failure).
     Handles a broad set of formats then falls back to dateutil for anything else.
@@ -140,16 +149,34 @@ def parse_date(date_str: str) -> Optional[date]:
     cleaned = re.sub(r'\s*\([^)]+\)\s*', ' ', date_str).strip()
     cleaned = re.sub(r'(\d{1,2})(?:st|nd|rd|th)\b', r'\1', cleaned).strip()
 
-    formats = [
+    base_formats = [
         '%Y-%m-%d',      # 2025-01-15
-        '%d-%m-%Y',      # 15-01-2025
-        '%d/%m/%Y',      # 15/01/2025
-        '%d.%m.%Y',      # 15.01.2025
         '%d-%b-%Y',      # 15-Jan-2025
         '%d-%b-%y',      # 15-Jan-25
         '%B %d,%Y',      # January 15,2025
         '%B %d, %Y',     # January 15, 2025
     ]
+    dmy_formats = [
+        '%d-%m-%Y',
+        '%d/%m/%Y',
+        '%d.%m.%Y',
+        '%d-%m-%y',
+        '%d/%m/%y',
+        '%d.%m.%y',
+    ]
+    mdy_formats = [
+        '%m-%d-%Y',
+        '%m/%d/%Y',
+        '%m.%d.%Y',
+        '%m-%d-%y',
+        '%m/%d/%y',
+        '%m.%d.%y',
+    ]
+
+    if date_order_hint == 'mdy':
+        formats = base_formats + mdy_formats + dmy_formats
+    else:
+        formats = base_formats + dmy_formats + mdy_formats
 
     for fmt in formats:
         try:
@@ -159,9 +186,37 @@ def parse_date(date_str: str) -> Optional[date]:
 
     # Fallback: dateutil handles almost any human-readable date string
     try:
-        return dateutil_parser.parse(cleaned, dayfirst=True).date()
+        dayfirst = False if date_order_hint == 'mdy' else True
+        return dateutil_parser.parse(cleaned, dayfirst=dayfirst).date()
     except Exception:
         return None
+
+
+def detect_date_order_hint(text: str) -> Optional[str]:
+    """
+    Detect likely numeric date order for the file.
+
+    Returns:
+        'mdy' if MM/DD is dominant,
+        'dmy' if DD/MM is dominant,
+        None if inconclusive.
+    """
+    mdy_votes = 0
+    dmy_votes = 0
+
+    for m in re.finditer(r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b', text):
+        a = int(m.group(1))
+        b = int(m.group(2))
+        if a > 12 and b <= 12:
+            dmy_votes += 1
+        elif b > 12 and a <= 12:
+            mdy_votes += 1
+
+    if mdy_votes > dmy_votes:
+        return 'mdy'
+    if dmy_votes > mdy_votes:
+        return 'dmy'
+    return None
 
 
 def is_free_date(d: str) -> bool:
@@ -438,6 +493,8 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None, kno
     with open(txt_path, 'r', encoding='utf-8') as f:
         text = f.read()
 
+    date_order_hint = detect_date_order_hint(text)
+
     # Detect exchange from file path
     path_str = str(txt_path).lower().replace('\\', '/')
     is_nse = '/nse/' in path_str
@@ -462,10 +519,10 @@ def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None, kno
         to_date = None
 
         if row_dict.get('from_date'):
-            from_date = parse_date(row_dict['from_date'])
+            from_date = parse_date(row_dict['from_date'], date_order_hint=date_order_hint)
         if row_dict.get('to_date') or row_dict.get('lockin_date'):
             date_str = row_dict.get('to_date') or row_dict.get('lockin_date')
-            to_date = parse_date(date_str)
+            to_date = parse_date(date_str, date_order_hint=date_order_hint)
 
         # Determine row status
         # Use raw parser's classification (date expiration is NOT checked)
