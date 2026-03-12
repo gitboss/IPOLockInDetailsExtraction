@@ -1255,6 +1255,27 @@ try {
       return map[bucket.toLowerCase()] || bucket;
     }
 
+    function normalizeWebPath(p) {
+      if (!p) return '';
+      let s = String(p).replace(/\\/g, '/').trim();
+
+      // Convert server filesystem paths to public web paths.
+      // Example: /home/bluenile/web/gifed.com/public_html/nile/... -> /nile/...
+      const publicHtmlIdx = s.toLowerCase().indexOf('/public_html');
+      if (publicHtmlIdx !== -1) {
+        s = s.substring(publicHtmlIdx + '/public_html'.length);
+      } else {
+        s = s
+          .replace(/^\/home\/[^/]+\/web\/[^/]+\/public_html/i, '')
+          .replace(/^home\/[^/]+\/web\/[^/]+\/public_html/i, '');
+      }
+
+      if (s && !s.startsWith('/') && /^(nile|downloads|finalized)\//i.test(s)) {
+        s = '/' + s;
+      }
+      return s;
+    }
+
     function escapeHtml(str) {
       return String(str ?? '')
         .replace(/&/g, '&amp;')
@@ -1331,21 +1352,22 @@ try {
       })();
 
       // Build file paths - finalized files are moved to 'finalized/' subfolder in same directory
-      const pdfFile = (s.pdf_file || s.lockin_pdf_path || '').replace(/\\/g, '/');
+      const pdfFile = normalizeWebPath(s.pdf_file || s.lockin_pdf_path || '');
       const pdfName = pdfFile ? pdfFile.split('/').pop() : '';
       const stem = pdfName ? pdfName.replace(/\.pdf$/i, '') : '';
       const shpName = s.exchange === 'BSE' ? pdfName.replace('I.', 'II.') : 'SHP-' + (s.symbol || '') + '.pdf';
 
       // Build base paths by extracting directory from stored paths
       const pdfBase = pdfFile ? pdfFile.substring(0, pdfFile.lastIndexOf('/') + 1) : '';
-      const shpBase = s.shp_pdf_path ? s.shp_pdf_path.replace(/\\/g, '/').substring(0, s.shp_pdf_path.replace(/\\/g, '/').lastIndexOf('/') + 1) : pdfBase.replace('pdf/lockin', 'pdf/shp');
+      const shpStored = normalizeWebPath(s.shp_pdf_path || '');
+      const shpBase = shpStored ? shpStored.substring(0, shpStored.lastIndexOf('/') + 1) : pdfBase.replace('pdf/lockin', 'pdf/shp');
       const pngBase = Array.isArray(s.png_files) && s.png_files.length
-        ? s.png_files[0].replace(/\\/g, '/').substring(0, s.png_files[0].replace(/\\/g, '/').lastIndexOf('/') + 1)
+        ? normalizeWebPath(s.png_files[0]).substring(0, normalizeWebPath(s.png_files[0]).lastIndexOf('/') + 1)
         : pdfBase.replace('pdf/lockin', 'pdf/lockin/png');
 
       // TXT file paths from database
-      const lockinTxtFile = (s.lockin_txt_java || '').replace(/\\/g, '/');
-      const shpTxtFile = (s.shp_txt_java || '').replace(/\\/g, '/');
+      const lockinTxtFile = normalizeWebPath(s.lockin_txt_java || '');
+      const shpTxtFile = normalizeWebPath(s.shp_txt_java || '');
       const lockinTxtBase = lockinTxtFile ? lockinTxtFile.substring(0, lockinTxtFile.lastIndexOf('/') + 1) : '';
       const shpTxtBase = shpTxtFile ? shpTxtFile.substring(0, shpTxtFile.lastIndexOf('/') + 1) : '';
 
@@ -1431,13 +1453,13 @@ try {
       <div style="grid-column:1/-1;height:6px"></div>
 
       <div style="grid-column:1/-1;display:contents">
-        <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:2px">Processed</div>
+        <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding-bottom:2px">Listing Date</div>
         <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;text-align:right;padding-bottom:2px">Promoter</div>
         <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;text-align:right;padding-bottom:2px">Public</div>
         <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;text-align:right;padding-bottom:2px">Total SHP</div>
         <div style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:0.5px;text-align:right;padding-bottom:2px;grid-column:span 2">SHP Locked</div>
 
-        <div style="color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.processed_at || '-'}</div>
+        <div style="color:var(--cyan);font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.listing_date_actual || '-'}</div>
         <div style="text-align:right;font-weight:700;font-size:13px;white-space:nowrap;${shpSplitMatch ? '' : 'color:var(--red)'}">${fmt(s.promoter_shares)} <small style="font-weight:400;color:var(--muted)">(${psPct}%)</small></div>
         <div style="text-align:right;font-weight:700;font-size:13px;white-space:nowrap;${shpSplitMatch ? '' : 'color:var(--red)'}">${fmt(s.public_shares)} <small style="font-weight:400;color:var(--muted)">(${pubsPct}%)</small></div>
         <div style="text-align:right;font-weight:700;font-size:13px">${fmt(s.total_shares)}</div>

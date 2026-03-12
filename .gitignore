@@ -13,3 +13,4 @@ test_*.txt
 test_*.php
 fixtures/
 logs/
+skills/

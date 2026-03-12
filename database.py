@@ -123,6 +123,8 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             shp_promoter_shares = VALUES(shp_promoter_shares),
             shp_public_shares = VALUES(shp_public_shares),
             shp_others_shares = VALUES(shp_others_shares),
+            allotment_date = VALUES(allotment_date),
+            declared_total = VALUES(declared_total),
             validation_results = VALUES(validation_results),
             all_rules_passed = VALUES(all_rules_passed),
             failed_rules = VALUES(failed_rules),
