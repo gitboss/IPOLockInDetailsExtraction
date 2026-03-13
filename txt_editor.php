@@ -16,11 +16,16 @@ function normalize_input_path($path)
     if ($path === '') {
         return '';
     }
+    $isAbsoluteUnix = (strpos($path, '/') === 0);
+    $isAbsoluteWindows = (bool)preg_match('/^[A-Za-z]:\//', $path);
     // Convert web-style path to filesystem path under project root.
     if (strpos($path, '/nile/sme/notices/') === 0) {
         $path = substr($path, strlen('/nile/sme/notices/'));
     }
-    $path = ltrim($path, '/');
+    // Preserve true absolute filesystem paths (/home/... or C:/...).
+    if (!$isAbsoluteUnix && !$isAbsoluteWindows) {
+        $path = ltrim($path, '/');
+    }
     return $path;
 }
 
