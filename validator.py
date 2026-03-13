@@ -211,30 +211,38 @@ def validate_rule6(lockin: LockinData, anchor_letter_url: str) -> ValidationResu
     If anchor_letter_url exists → must find anchor rows
     If anchor_letter_url is NULL → must NOT find anchor rows
     """
-    # Count anchor rows (using NEW bucket names)
-    anchor_rows = [
-        row for row in lockin.rows
-        if row.bucket.value in ('anchor_90', 'anchor_30')
-    ]
-    anchor_count = len(anchor_rows)
+    anchor_30_count = sum(1 for row in lockin.rows if row.bucket.value == 'anchor_30')
+    anchor_90_count = sum(1 for row in lockin.rows if row.bucket.value == 'anchor_90')
+    anchor_count = anchor_30_count + anchor_90_count
     has_anchor_rows = anchor_count > 0
 
     # Check anchor_letter_url
     has_anchor_url = anchor_letter_url is not None and anchor_letter_url.strip() != ''
 
     # Validation logic
-    if has_anchor_url and has_anchor_rows:
-        # Expected: anchor URL exists and anchor rows found
+    if has_anchor_url and anchor_30_count > 0 and anchor_90_count > 0:
+        # Expected: anchor URL exists and BOTH anchor buckets found
         passed = True
-        message = f"Anchor letter URL exists and {anchor_count} anchor row(s) found"
+        message = (
+            "Anchor letter URL exists and both anchor buckets found "
+            f"(anchor_30={anchor_30_count}, anchor_90={anchor_90_count})"
+        )
+    elif has_anchor_url:
+        # Error: anchor URL exists but one/both anchor bucket(s) missing
+        passed = False
+        missing = []
+        if anchor_30_count == 0:
+            missing.append("anchor_30")
+        if anchor_90_count == 0:
+            missing.append("anchor_90")
+        message = (
+            "Anchor letter URL exists but missing required anchor bucket(s): "
+            f"{', '.join(missing)} (anchor_30={anchor_30_count}, anchor_90={anchor_90_count})"
+        )
     elif not has_anchor_url and not has_anchor_rows:
         # Expected: no anchor URL and no anchor rows
         passed = True
         message = "No anchor letter URL and no anchor rows (correct)"
-    elif has_anchor_url and not has_anchor_rows:
-        # Error: anchor URL exists but no anchor rows found
-        passed = False
-        message = f"Anchor letter URL exists but no anchor rows found (expected anchor)"
     else:  # not has_anchor_url and has_anchor_rows
         # Error: no anchor URL but anchor rows found
         passed = False

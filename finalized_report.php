@@ -1308,6 +1308,16 @@ try {
       return s.status || '';
     }
 
+    function buildEditorUrl(filePath, s, typeLabel) {
+      const params = new URLSearchParams();
+      params.set('file', filePath || '');
+      params.set('symbol', s.symbol || '');
+      params.set('code', s.exchange_code || '');
+      params.set('company', s.company_name || '');
+      params.set('type', typeLabel || 'TXT');
+      return `txt_editor.php?${params.toString()}`;
+    }
+
     function enrichScrip(s) {
       const locked = (s.rows || []).filter(r => r.row_class === 'locked' || r.row_class === 'anchor');
       const free = (s.rows || []).filter(r => r.row_class === 'free');
@@ -1383,14 +1393,21 @@ try {
       const shpStem = s.exchange === 'BSE' ? stem.replace('Annexure-I', 'Annexure-II') : 'SHP-' + (s.symbol || '');
       const shpTxtName = shpTxtFile ? shpTxtFile.split('/').pop() : (shpStem + '_java.txt');
 
+      const lockinTxtHref = isFinalized
+        ? `${lockinTxtPathFinalized}${lockinTxtName}`
+        : buildEditorUrl(s.lockin_txt_java || lockinTxtFile, s, 'Lock-in TXT');
+      const shpTxtHref = isFinalized
+        ? `${shpTxtPathFinalized}${shpTxtName}`
+        : buildEditorUrl(s.shp_txt_java || shpTxtFile, s, 'SHP TXT');
+
       const linksHtml = pdfName ? `
     <div class="card-links">
       <a class="link-btn" href="${pdfPathFinalized}${pdfName}" target="_blank">📄 PDF</a>
       <a class="link-btn" href="${shpPathFinalized}${shpName}" target="_blank">📊 SHP PDF</a>
       <a class="link-btn" href="${pngPathFinalized}${stem}.png" target="_blank">🖼 PNG</a>
       <span style="color:var(--muted);margin:0 4px">|</span>
-      <a class="link-btn" href="${lockinTxtPathFinalized}${lockinTxtName}" target="_blank">📝 Lock-in TXT</a>
-      <a class="link-btn" href="${shpTxtPathFinalized}${shpTxtName}" target="_blank">📝 SHP TXT</a>
+      <a class="link-btn" href="${lockinTxtHref}" target="_blank">📝 Lock-in TXT</a>
+      <a class="link-btn" href="${shpTxtHref}" target="_blank">📝 SHP TXT</a>
     </div>` : '';
 
       const rowsHtml = (s.rows || []).length === 0

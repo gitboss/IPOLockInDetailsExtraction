@@ -473,7 +473,11 @@ def extract_declared_total(text: str) -> Optional[int]:
     return None
 
 
-def parse_lockin_file(txt_path: Path, allotment_date: Optional[date] = None, known_total: Optional[int] = None) -> LockinData:
+def parse_lockin_file(
+    txt_path: Path,
+    allotment_date: Optional[date] = None,
+    known_total: Optional[int] = None
+) -> LockinData:
     """
     Parse lock-in TXT file (unified for NSE and BSE)
     PRODUCTION LOGIC - Replicated from F:\\python\\ScripUnlockDetails
