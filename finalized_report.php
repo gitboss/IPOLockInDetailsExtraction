@@ -1330,7 +1330,8 @@ try {
     function renderScripCard(s) {
       const isFinalized = !!s.finalized;
       const effectiveStatus = s.effective_status || getEffectiveStatus(s);
-      const totalShares = Number(s.total_shares || s.computed_total) || 0;
+      // Top summary block uses lock-in math (locked/free), so total should prefer lock-in computed total.
+      const totalShares = Number(s.computed_total || s.total_shares) || 0;
       const lockedShares = s.locked_shares || 0;
       const freeShares = s.free_shares || 0;
       const lockedPct = totalShares ? ((lockedShares / totalShares) * 100).toFixed(1) : '-';
