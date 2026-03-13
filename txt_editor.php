@@ -10,6 +10,12 @@ function h($s)
     return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 }
 
+function last_php_error_message()
+{
+    $e = error_get_last();
+    return $e && !empty($e['message']) ? $e['message'] : 'Unknown PHP write error.';
+}
+
 function normalize_input_path($path)
 {
     $path = str_replace('\\', '/', trim((string)$path));
@@ -76,9 +82,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$error) {
     if (!$canEdit) {
         $error = "Finalized TXT files cannot be edited.";
     } else {
+        if (!is_writable($realPath)) {
+            $error = "File is not writable by web server user: " . basename($realPath);
+        }
+    }
+
+    if (!$error) {
         if ($action === 'save') {
             if (@file_put_contents($realPath, $content) === false) {
-                $error = "Failed to save file.";
+                $error = "Failed to save file: " . last_php_error_message();
             } else {
                 $success = "Saved successfully.";
             }
@@ -93,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$error) {
                 }
                 $targetPath = dirname($realPath) . DIRECTORY_SEPARATOR . $newName;
                 if (@file_put_contents($targetPath, $content) === false) {
-                    $error = "Failed to save as new file.";
+                    $error = "Failed to save as new file: " . last_php_error_message();
                 } else {
                     $success = "Saved as " . $newName;
                 }
