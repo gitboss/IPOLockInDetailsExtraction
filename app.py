@@ -1273,7 +1273,15 @@ class IPOProcessor:
             )
 
             processor = IPOProcessor(args)
-            exit_code = processor.process()
+            try:
+                exit_code = processor.process()
+            except SystemExit as e:
+                # Keep folder-mode resilient: one file failure should not stop the batch.
+                exit_code = e.code if isinstance(e.code, int) else EXIT_VALIDATION_FAILED
+                print(f"\n⚠️  File processing aborted for {pdf_file.name} (exit={exit_code}). Continuing...")
+            except Exception as e:
+                exit_code = EXIT_PARSE_ERROR
+                print(f"\n⚠️  Unexpected error for {pdf_file.name}: {e}. Continuing...")
             symbol_label = processor.get_run_symbol()
 
             if exit_code == EXIT_SUCCESS:
