@@ -221,6 +221,25 @@ try {
       color: var(--accent);
     }
 
+    .copy-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 11px;
+      cursor: pointer;
+      user-select: none;
+      max-width: 360px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .copy-chip:hover { border-color: var(--blue); }
+
     .header-right {
       margin-left: auto;
       display: flex;
@@ -1308,6 +1327,14 @@ try {
       return s.status || '';
     }
 
+    async function copyText(value) {
+      try {
+        await navigator.clipboard.writeText(value);
+      } catch (e) {
+        // no-op fallback (clipboard permission may be blocked)
+      }
+    }
+
     function buildEditorUrl(filePath, s, typeLabel) {
       const params = new URLSearchParams();
       params.set('file', filePath || '');
@@ -1444,6 +1471,7 @@ try {
           <span class="card-symbol">${s.symbol || s.unique_symbol || ''}</span>
           ${s.exchange_code ? `<span style="font-size:11px;color:var(--muted)">${s.exchange_code}</span>` : ''}
         </div>
+        ${pdfName ? `<div class="copy-chip" title="Click to copy lock-in filename" onclick="copyText('${(pdfName || '').replace(/'/g, \"\\\\'\")}')">📄 ${pdfName}</div>` : ''}
       </div>
       <span class="badge ex-${s.exchange || 'BSE'}">${s.exchange || ''}</span>
       <span class="badge st-${effectiveStatus.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}">${effectiveStatus}</span>
