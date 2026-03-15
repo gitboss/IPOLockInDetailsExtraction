@@ -1335,6 +1335,15 @@ try {
       }
     }
 
+    function copyEncoded(value) {
+      if (!value) return;
+      try {
+        copyText(decodeURIComponent(value));
+      } catch (e) {
+        // ignore malformed encoding
+      }
+    }
+
     function buildEditorUrl(filePath, s, typeLabel) {
       const params = new URLSearchParams();
       params.set('file', filePath || '');
@@ -1471,7 +1480,7 @@ try {
           <span class="card-symbol">${s.symbol || s.unique_symbol || ''}</span>
           ${s.exchange_code ? `<span style="font-size:11px;color:var(--muted)">${s.exchange_code}</span>` : ''}
         </div>
-        ${pdfName ? `<div class="copy-chip" title="Click to copy lock-in filename" onclick="copyText('${(pdfName || '').replace(/'/g, \"\\\\'\")}')">📄 ${pdfName}</div>` : ''}
+        ${pdfName ? `<div class="copy-chip" title="Click to copy lock-in filename" data-copy="${encodeURIComponent(pdfName)}" onclick="copyEncoded(this.getAttribute('data-copy'))">📄 ${pdfName}</div>` : ''}
       </div>
       <span class="badge ex-${s.exchange || 'BSE'}">${s.exchange || ''}</span>
       <span class="badge st-${effectiveStatus.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}">${effectiveStatus}</span>
