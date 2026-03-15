@@ -209,7 +209,7 @@ def extract_dates_from_line(line: str):
         Dict with 'from_date_raw', 'to_date_raw', 'from_date', 'to_date'
     """
     # Comprehensive date pattern (same for ALL strategies)
-    date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|IPO\s+Shares?|FREE|N/?A|NA|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
+    date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|IPO\s+Shares?|FREE|N/?A|N\.?A\.?|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+,?\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
     dates_found = re.findall(date_pattern, line, re.IGNORECASE)
 
     from_date_raw = ''

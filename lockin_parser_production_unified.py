@@ -561,7 +561,7 @@ def parse_bse_strategy3_range_calculation(text: str, known_total: Optional[int] 
         shares = to_num - from_num + 1
         
         # [RANGE-CALC 2026-03-09] Same date extraction as Strategy 1
-        date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|NA|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
+        date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|N\.?A\.?|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+,?\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
         dates_found = re.findall(date_pattern, line, re.IGNORECASE)
         
         lockin_date = None
@@ -755,7 +755,7 @@ def parse_bse_strategy4_no_malformed_cleanup(text: str, known_total: Optional[in
         
         # [ASTONEA-FIX 2026-03-09] Same date extraction as Strategy 1
         # Supports DD.MM.YYYY, DD/MM/YYYY, DD-Mon-YYYY, etc.
-        date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|NA|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
+        date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|N\.?A\.?|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+,?\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
         dates_found = re.findall(date_pattern, line, re.IGNORECASE)
         
         from_date_raw = ''
@@ -947,7 +947,7 @@ def parse_bse_strategy1_line_by_line(text: str) -> Dict:
 
         # Extract dates - handle multiple formats
         # Common BSE formats: DD/MM/YYYY, DD-Mon-YYYY, DD-MM-YYYY, Month DD, YYYY, DDth Month YYYY, FREE, N/A, Free IPO Shares
-        date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|NA|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
+        date_pattern = r'(Free\s+(?:IPO\s+)?Shares?|FREE|N/?A|N\.?A\.?|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+,?\s+\d{4}|\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}(?:\s*\([^)]+\))?|\d{1,2}[-/\.][A-Za-z]{3}[-/\.]\d{2,4}|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})'
         dates_found = re.findall(date_pattern, line, re.IGNORECASE)
 
         from_date_raw = ''
