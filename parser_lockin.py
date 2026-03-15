@@ -476,7 +476,9 @@ def extract_declared_total(text: str) -> Optional[int]:
 def parse_lockin_file(
     txt_path: Path,
     allotment_date: Optional[date] = None,
-    known_total: Optional[int] = None
+    known_total: Optional[int] = None,
+    listing_date_actual: Optional[date] = None,
+    expected_listing_date: Optional[date] = None,
 ) -> LockinData:
     """
     Parse lock-in TXT file (unified for NSE and BSE)
@@ -486,6 +488,8 @@ def parse_lockin_file(
         txt_path: Path to *_java.txt file
         allotment_date: Allotment date from sme_ipo_master (for bucket calculation)
         known_total: Known total shares from sme_ipo_master (makes Strategy 2 more robust for BSE)
+        listing_date_actual: Actual listing date from sme_ipo_master (bucket fallback)
+        expected_listing_date: Expected listing date from sme_ipo_master (bucket fallback)
 
     Returns:
         LockinData with all extracted rows and computed totals
@@ -515,6 +519,10 @@ def parse_lockin_file(
         if not result.get('rows'):
             result = parse_lockin_table(text)
 
+    # Bucket-date fallback order:
+    # 1) allotment_date 2) listing_date_actual 3) expected_listing_date
+    bucket_reference_date = allotment_date or listing_date_actual or expected_listing_date
+
     # Convert production parser results to LockinData model
     rows = []
     for row_dict in result.get('rows', []):
@@ -534,8 +542,8 @@ def parse_lockin_file(
         is_free = row_dict.get('is_free', False)
         row_status = RowStatus.FREE if is_free else RowStatus.LOCKED
 
-        # Calculate bucket
-        bucket = calculate_bucket(allotment_date, from_date, to_date) if allotment_date else LockBucket.FREE
+        # Calculate bucket using resolved reference date fallback.
+        bucket = calculate_bucket(bucket_reference_date, from_date, to_date)
 
         # Create LockinRow
         lockin_row = LockinRow(

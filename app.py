@@ -116,6 +116,9 @@ class IPOProcessor:
 
         # Step 2: Master data (from sme_ipo_master)
         self.allotment_date = None
+        self.listing_date_actual = None
+        self.expected_listing_date = None
+        self.bucket_reference_date = None
         self.processing_log_id = None  # Saved after database insert
         self.declared_total = None
         self.anchor_letter_url = None
@@ -688,17 +691,52 @@ class IPOProcessor:
             master_data = get_master_data(self.unique_symbol)
 
             if master_data:
-                self.allotment_date, self.declared_total, self.anchor_letter_url = master_data
-                self.log_step(step_num, "✓", f"Master data found: Allotment={self.allotment_date}, Declared={self.declared_total:,}")
+                (
+                    self.allotment_date,
+                    self.listing_date_actual,
+                    self.expected_listing_date,
+                    self.declared_total,
+                    self.anchor_letter_url,
+                ) = master_data
+
+                # Bucket-date fallback order (compatibility-safe):
+                # 1) allotment_date -> 2) listing_date_actual -> 3) expected_listing_date
+                self.bucket_reference_date = (
+                    self.allotment_date
+                    or self.listing_date_actual
+                    or self.expected_listing_date
+                )
+                reference_label = "none"
+                if self.bucket_reference_date == self.allotment_date and self.allotment_date:
+                    reference_label = "allotment_date"
+                elif self.bucket_reference_date == self.listing_date_actual and self.listing_date_actual:
+                    reference_label = "listing_date_actual"
+                elif self.bucket_reference_date == self.expected_listing_date and self.expected_listing_date:
+                    reference_label = "expected_listing_date"
+
+                declared_display = f"{self.declared_total:,}" if self.declared_total else "0"
+                self.log_step(
+                    step_num,
+                    "✓",
+                    f"Master data found: Allotment={self.allotment_date}, "
+                    f"ListingActual={self.listing_date_actual}, ExpectedListing={self.expected_listing_date}, "
+                    f"Declared={declared_display}, BucketRef={self.bucket_reference_date} ({reference_label})"
+                )
             else:
                 print(f"\n⚠️  Warning: No master data found for {self.unique_symbol} in sme_ipo_master")
                 print("   Continuing without allotment_date and declared_total (some validations will be skipped)")
                 self.allotment_date = None
+                self.listing_date_actual = None
+                self.expected_listing_date = None
+                self.bucket_reference_date = None
                 self.declared_total = None
                 self.anchor_letter_url = None
         else:
             self.log_step(step_num, "✓", f"Master data retrieved (dry-run/nodb mode)")
             self.allotment_date = None
+            self.listing_date_actual = None
+            self.expected_listing_date = None
+            self.bucket_reference_date = None
             self.declared_total = 10000000  # Dummy for dry-run
             self.anchor_letter_url = None
 
@@ -737,7 +775,9 @@ class IPOProcessor:
                 self.lockin_data = parse_lockin_file(
                     self.lockin_java_txt,
                     self.allotment_date,
-                    self.declared_total
+                    self.declared_total,
+                    listing_date_actual=self.listing_date_actual,
+                    expected_listing_date=self.expected_listing_date,
                 )
                 self.log_step(step_num, "✓", f"Lock-in parsed: {len(self.lockin_data.rows)} rows, Total={self.lockin_data.computed_total:,}, Locked={self.lockin_data.locked_total:,}")
             except Exception as e:
@@ -929,7 +969,7 @@ class IPOProcessor:
                 self.declared_total,
                 self.anchor_letter_url,
                 parsed_declared_total=self.lockin_data.declared_total if self.lockin_data else None,
-                allotment_date=self.allotment_date
+                allotment_date=self.bucket_reference_date
             )
 
             # Apply manual overrides (if requested)

@@ -13,7 +13,7 @@ from models import LockinData, SHPData, ValidationResult, ProcessingStatus
 import db
 
 
-def get_master_data(unique_symbol: str) -> Optional[Tuple[date, int, str]]:
+def get_master_data(unique_symbol: str) -> Optional[Tuple[date, date, date, int, str]]:
     """
     Get data from sme_ipo_master table
 
@@ -21,7 +21,8 @@ def get_master_data(unique_symbol: str) -> Optional[Tuple[date, int, str]]:
         unique_symbol: e.g., "BSE:544324" or "NSE:AAKAAR"
 
     Returns:
-        (allotment_date, declared_total, anchor_letter_url) or None if not found
+        (allotment_date, listing_date_actual, expected_listing_date, declared_total, anchor_letter_url)
+        or None if not found
     """
     # Parse unique_symbol
     parts = unique_symbol.split(':')
@@ -34,7 +35,7 @@ def get_master_data(unique_symbol: str) -> Optional[Tuple[date, int, str]]:
     if exchange == "BSE":
         # For BSE, unique_symbol uses CODE
         sql = """
-            SELECT allotment_date, post_issue_shares, anchor_letter_url
+            SELECT allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url
             FROM sme_ipo_master
             WHERE exchange = 'BSE SME' AND bse_script_code = %s
             LIMIT 1
@@ -43,7 +44,7 @@ def get_master_data(unique_symbol: str) -> Optional[Tuple[date, int, str]]:
     else:  # NSE
         # For NSE, unique_symbol uses SYMBOL
         sql = """
-            SELECT allotment_date, post_issue_shares, anchor_letter_url
+            SELECT allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url
             FROM sme_ipo_master
             WHERE exchange = 'NSE SME' AND nse_symbol = %s
             LIMIT 1
@@ -57,6 +58,8 @@ def get_master_data(unique_symbol: str) -> Optional[Tuple[date, int, str]]:
 
     return (
         result.get('allotment_date'),
+        result.get('listing_date_actual'),
+        result.get('expected_listing_date'),
         result.get('post_issue_shares'),
         result.get('anchor_letter_url')
     )
@@ -461,8 +464,10 @@ def main():
     master_data = get_master_data(unique_symbol)
 
     if master_data:
-        allotment_date, declared_total, anchor_url = master_data
+        allotment_date, listing_date_actual, expected_listing_date, declared_total, anchor_url = master_data
         print(f"   ✓ Allotment Date: {allotment_date}")
+        print(f"   ✓ Listing Date Actual: {listing_date_actual}")
+        print(f"   ✓ Expected Listing Date: {expected_listing_date}")
         print(f"   ✓ Declared Total: {declared_total:,}")
         print(f"   ✓ Anchor URL: {anchor_url or 'None'}")
     else:
