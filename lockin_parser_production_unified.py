@@ -1239,6 +1239,148 @@ def parse_bse_strategy5_sum_first_soft_labels(
     }
 
 
+def parse_bse_strategy6_two_dates(
+    text: str,
+    known_total: Optional[int] = None
+) -> Optional[Dict]:
+    """
+    Strategy 6: Two-date row parser (FINAL BSE fallback).
+
+    Purpose:
+    - Handle rows that explicitly contain BOTH lock-in from and lock-in upto dates.
+    - Keep free rows (FREE/IPO Shares) in the same pass.
+    - Prefer text TOTAL consistency over DB hint if DB hint is stale.
+    """
+    lines = text.split('\n')
+    rows = []
+
+    footer_patterns = [
+        r'^\s*Name\s*:', r'^\s*Designation\s*:', r'^\s*Place\s*:',
+        r'\bFor\s+\w+.*Limited', r'Company Secretary', r'Membership No\.',
+        r'^\s*Notes?:', r'The Distinctive Numbers are for the purpose',
+        r'DEMAT\s*-\s*\d+\s*YEAR', r'^\s*For\s+.*\s+Limited\s*$', r'^\s*Sd/-',
+    ]
+    header_keywords = [
+        'Distinctive', 'Number of Securities', 'Lock in date',
+        'Type of Security', 'Physical/Demat', 'Demat/Physical',
+        'Lock-in', 'From', 'To', 'Folio Number'
+    ]
+
+    declared_total_from_text = None
+    saw_two_date_locked_row = False
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith('---') or line.startswith('####'):
+            continue
+        if any(re.search(pattern, line, re.IGNORECASE) for pattern in footer_patterns):
+            break
+
+        tokens = line.split()
+        nums: List[int] = []
+        for token in tokens:
+            val = clean_num(token)
+            if val is not None:
+                nums.append(val)
+
+        if 'total' in line.lower():
+            if nums:
+                declared_total_from_text = max(nums)
+            continue
+
+        if len(nums) < 3:
+            if any(kw in line for kw in header_keywords):
+                continue
+            continue
+
+        shares = nums[0]
+        from_num = nums[1]
+        to_num = nums[2]
+        if shares <= 0:
+            continue
+
+        # Distinctive math sanity check (same as other BSE strategies).
+        if from_num > 0 and to_num > 0:
+            expected_shares = to_num - from_num + 1
+            if shares != expected_shares:
+                continue
+
+        date_info = extract_dates_from_line(line)
+        from_date = date_info['from_date']
+        to_date = date_info['to_date']
+        raw_lockin = to_date if to_date else from_date
+
+        # Track if this strategy is actually handling two-date locked rows.
+        if from_date and to_date and to_date != 'FREE':
+            saw_two_date_locked_row = True
+
+        # Extract light metadata when present (same spirit as Strategy 1).
+        type_patterns = [
+            r'F\s*&\s*L', r'Fully\s+Paid', r'F\s*-?\s*Fully',
+            r'Partly\s+Paid', r'Lock[- ]in', r'IPO', r'Anchor',
+        ]
+        type_security = ''
+        for pattern in type_patterns:
+            m = re.search(pattern, line, re.IGNORECASE)
+            if m:
+                type_security = norm(m.group(0))
+                break
+
+        demat_match = re.search(r'(Demat|Physical)', line, re.IGNORECASE)
+        physical_demat = norm(demat_match.group(0)) if demat_match else ''
+
+        row_class = classify_row(type_security, raw_lockin)
+        is_free = (row_class == 'free')
+
+        rows.append({
+            'shares': shares,
+            'from': from_num,
+            'to': to_num,
+            'type_security': type_security,
+            'from_date': from_date,
+            'to_date': to_date,
+            'lockin_date': to_date if to_date else from_date,
+            'raw_lockin': raw_lockin,
+            'physical_demat': physical_demat,
+            'is_free': is_free,
+            'row_class': row_class,
+        })
+
+    if not rows or not saw_two_date_locked_row:
+        return None
+
+    computed_total = sum(r['shares'] for r in rows)
+
+    # Backward-compatible acceptance:
+    # prefer exact TOTAL row from text; fallback to known_total if text total absent.
+    if declared_total_from_text is not None:
+        if computed_total != declared_total_from_text:
+            return None
+        total_match = True
+        declared_total = declared_total_from_text
+    elif known_total is not None:
+        if computed_total != known_total:
+            return None
+        total_match = True
+        declared_total = known_total
+    else:
+        declared_total = computed_total
+        total_match = True
+
+    return {
+        'rows': rows,
+        'declared_total': declared_total,
+        'computed_total': computed_total,
+        'total_match': total_match,
+        'rows_count': len(rows),
+        'free_count': sum(1 for r in rows if r.get('is_free')),
+        'locked_count': sum(1 for r in rows if not r.get('is_free')),
+        'free_shares': sum(r['shares'] for r in rows if r.get('is_free')),
+        'locked_shares': sum(r['shares'] for r in rows if not r.get('is_free')),
+        'strategy': 'two_dates_fallback',
+    }
+
+
 def parse_bse_text(
     text: str,
     known_total: Optional[int] = None,
@@ -1254,6 +1396,7 @@ def parse_bse_text(
     3. Strategy 4: 3-number format without malformed cleanup [ASTONEA-FIX 2026-03-09]
     4. Strategy 3: Distinctive Number Range Calculation [RANGE-CALC 2026-03-09]
     5. Strategy 5: Sum-first with soft distinctive labels (FINAL FALLBACK)
+    6. Strategy 6: Two-date fallback (final rescue for explicit from+upto rows)
 
     Args:
         text: Raw BSE lock-in text
@@ -1316,6 +1459,12 @@ def parse_bse_text(
         computed_total_hint=computed_total_hint,
     )
     if _is_strategy_result_acceptable(result):
+        return result
+
+    # Strategy 6: Two-date fallback (last resort for rows with explicit from+upto dates)
+    # Intentionally validated against text TOTAL to remain robust when DB hint is stale.
+    result = parse_bse_strategy6_two_dates(text, known_total=known_total)
+    if result and result.get('rows'):
         return result
 
     # All strategies failed
