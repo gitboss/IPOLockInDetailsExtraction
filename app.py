@@ -825,12 +825,17 @@ class IPOProcessor:
 
         try:
             doc = fitz.open(str(shp_pdf_path))
+            single_page_request = len(pages) == 1
             for page_no in pages:
                 idx = page_no - 1
                 if idx < 0 or idx >= doc.page_count:
                     print(f"\n⚠️  Blank SHP PNG capture skipped: {shp_pdf_path.name} missing page {page_no}")
                     continue
-                out_path = out_dir / f"{shp_pdf_path.stem}_page{page_no}_{dpi}dpi.png"
+                if single_page_request:
+                    out_name = f"{shp_pdf_path.stem}_java.png"
+                else:
+                    out_name = f"{shp_pdf_path.stem}_page{page_no}_java.png"
+                out_path = out_dir / out_name
                 page = doc[idx]
                 pix = page.get_pixmap(dpi=dpi)
                 pix.save(str(out_path))
