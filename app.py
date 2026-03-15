@@ -302,7 +302,7 @@ class IPOProcessor:
             self.unique_symbol = f"BSE:{self.code}"
 
         # [GUARD 2026-03-09] Check if already finalized (must rollback first)
-        if not self.no_db and not self.rollback:
+        if not self.no_db and not self.rollback and not self.shppng_pages:
             import db
             sql = """
                 SELECT status, finalized_at
@@ -1454,6 +1454,31 @@ class IPOProcessor:
             return self.rollback_processing()
         if self.shppngbulk:
             return self.process_shppng_bulk()
+        if self.shppng_pages:
+            self.print_header()
+            step_num = 1
+            if not self.file_name:
+                print("\n❌ --shppng requires a lock-in filename (single-file mode)")
+                print("   Use --shppngbulk for database-driven bulk blank SHP export.")
+                return EXIT_VALIDATION_FAILED
+
+            # SHPPNG-ONLY MODE: resolve lock-in/SHP paths, then export requested SHP pages.
+            # Do not run parsing/validation/finalization pipeline.
+            step_num = self.validate_files(step_num)
+            captured = self.save_blank_shp_pages_png(self.shp_pdf_path, self.shppng_pages, dpi=300)
+            if not captured:
+                print("\n❌ Failed to save SHP PNG page(s)")
+                return EXIT_PARSE_ERROR
+
+            rel = ", ".join(
+                str(p.relative_to(BASE_DIR)) if str(p).startswith(str(BASE_DIR)) else str(p)
+                for p in captured
+            )
+            self.log_step(step_num, "✓", f"SHP PNG(s) saved: {rel}")
+            print("\n" + "=" * 70)
+            print("SHP PNG EXPORT COMPLETE")
+            print("=" * 70)
+            return EXIT_SUCCESS
         
         self.print_header()
 
