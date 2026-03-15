@@ -94,8 +94,8 @@ def extract_table_rows(text: str) -> List[Dict]:
                     # Numeric month: "17-03-2026", "16-01-2026"
                     date_match = re.search(r'(\d{1,2})-([A-Za-z]{3})-(\d{2,4})', lockin_str)
                     if not date_match:
-                        # Try numeric month format
-                        date_match = re.search(r'\d{1,2}-\d{1,2}-\d{4}', lockin_str)
+                        # Try numeric month format with common separators (backward-compatible extension)
+                        date_match = re.search(r'\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4}', lockin_str)
                     if date_match:
                         lockin_date = lockin_str
 
