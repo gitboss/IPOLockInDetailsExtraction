@@ -97,7 +97,8 @@ def extract_table_rows(text: str) -> List[Dict]:
                         # Try numeric month format with common separators (backward-compatible extension)
                         date_match = re.search(r'\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4}', lockin_str)
                     if date_match:
-                        lockin_date = lockin_str
+                        # Keep only the date token (not surrounding type/form text)
+                        lockin_date = date_match.group(0)
 
                 rows.append({
                     'shares': shares,
