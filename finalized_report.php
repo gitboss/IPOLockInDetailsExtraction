@@ -1479,8 +1479,8 @@ try {
         <div style="display:flex;align-items:center;gap:8px">
           <span class="card-symbol">${s.symbol || s.unique_symbol || ''}</span>
           ${s.exchange_code ? `<span style="font-size:11px;color:var(--muted)">${s.exchange_code}</span>` : ''}
+          ${pdfName ? `<div class="copy-chip" title="Click to copy lock-in filename" data-copy="${encodeURIComponent(pdfName)}" onclick="copyEncoded(this.getAttribute('data-copy'))">📄 ${pdfName}</div>` : ''}
         </div>
-        ${pdfName ? `<div class="copy-chip" title="Click to copy lock-in filename" data-copy="${encodeURIComponent(pdfName)}" onclick="copyEncoded(this.getAttribute('data-copy'))">📄 ${pdfName}</div>` : ''}
       </div>
       <span class="badge ex-${s.exchange || 'BSE'}">${s.exchange || ''}</span>
       <span class="badge st-${effectiveStatus.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}">${effectiveStatus}</span>
