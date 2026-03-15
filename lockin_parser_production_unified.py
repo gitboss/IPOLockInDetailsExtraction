@@ -44,6 +44,9 @@ def extract_table_rows(text: str) -> List[Dict]:
     """
     rows = []
 
+    # Hotfix: remove known NSE circular toll-free token that can be misread as row data.
+    text = text.replace("1800 266 0058", " ")
+
     # Find lines that look like data rows (start with digits)
     # Pattern: number, whitespace, number (from), whitespace, number (to), whitespace, date or "Free"
 
