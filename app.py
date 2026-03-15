@@ -94,6 +94,9 @@ class IPOProcessor:
         self.manual_override = (args.manual_override or "").split(",") if args.manual_override else []
         self.reason = args.reason
         self.suppress_run_log = getattr(args, "suppress_run_log", False)
+        self.shppng = getattr(args, "shppng", None)
+        self.shppngbulk = getattr(args, "shppngbulk", False)
+        self.shppng_pages = self._parse_page_numbers(self.shppng) if self.shppng else []
 
         # File paths (will be set during validation)
         self.lockin_pdf_path = None
@@ -127,6 +130,42 @@ class IPOProcessor:
         self.blank_shp_error = None  # Set if SHP file is blank
         self.blank_lockin_error = None  # Set if lock-in file is blank [BLANK-TXT 2026-03-09]
         self.was_finalized = False  # True only when finalization actually succeeds (non-dry run)
+
+    @staticmethod
+    def _parse_page_numbers(raw: str) -> List[int]:
+        """
+        Parse page number spec like:
+        "2", "2,3,5", "2-4,7"
+        Returns sorted unique 1-based pages.
+        """
+        pages = set()
+        if not raw:
+            return []
+        for part in re.split(r'[,\s]+', raw.strip()):
+            if not part:
+                continue
+            if '-' in part:
+                bounds = part.split('-', 1)
+                if len(bounds) != 2:
+                    continue
+                try:
+                    a = int(bounds[0])
+                    b = int(bounds[1])
+                except ValueError:
+                    continue
+                if a > b:
+                    a, b = b, a
+                for p in range(a, b + 1):
+                    if p >= 1:
+                        pages.add(p)
+            else:
+                try:
+                    p = int(part)
+                    if p >= 1:
+                        pages.add(p)
+                except ValueError:
+                    continue
+        return sorted(pages)
 
     def print_header(self):
         """Print formatted header"""
@@ -730,6 +769,14 @@ class IPOProcessor:
                     # Set shp_data to None and store error for finalization
                     self.shp_data = None
                     self.blank_shp_error = error_msg
+                    if self.shppng_pages:
+                        captured = self.save_blank_shp_pages_png(self.shp_pdf_path, self.shppng_pages)
+                        if captured:
+                            rel = ", ".join(str(p.relative_to(BASE_DIR)) for p in captured)
+                            self.log_step(step_num, "✓", f"Blank SHP PNG(s) saved: {rel}")
+                        else:
+                            self.log_step(step_num, "⚠️", "Could not save requested blank SHP PNG page(s)")
+
                     step_num += 1
                     return step_num
             except Exception as e:
@@ -759,6 +806,89 @@ class IPOProcessor:
 
         step_num += 1
         return step_num
+
+    def save_blank_shp_pages_png(self, shp_pdf_path: Path, pages: List[int], dpi: int = 300) -> List[Path]:
+        """
+        Save selected SHP PDF pages as PNG in downloads/{exchange}/pdf/shp/png/blank.
+        Pages are 1-based.
+        """
+        if not shp_pdf_path or not shp_pdf_path.exists():
+            print("\n⚠️  Blank SHP PNG capture skipped: SHP PDF missing")
+            return []
+        if not HAVE_FITZ:
+            print("\n⚠️  Blank SHP PNG capture skipped: PyMuPDF (fitz) not installed")
+            return []
+
+        out_dir = DOWNLOADS_DIR / self.exchange.lower() / "pdf" / "shp" / "png" / "blank"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        saved: List[Path] = []
+
+        try:
+            doc = fitz.open(str(shp_pdf_path))
+            for page_no in pages:
+                idx = page_no - 1
+                if idx < 0 or idx >= doc.page_count:
+                    print(f"\n⚠️  Blank SHP PNG capture skipped: {shp_pdf_path.name} missing page {page_no}")
+                    continue
+                out_path = out_dir / f"{shp_pdf_path.stem}_page{page_no}_{dpi}dpi.png"
+                page = doc[idx]
+                pix = page.get_pixmap(dpi=dpi)
+                pix.save(str(out_path))
+                saved.append(out_path)
+            doc.close()
+            return saved
+        except Exception as e:
+            print(f"\n⚠️  Blank SHP PNG capture failed: {e}")
+            return []
+
+    def process_shppng_bulk(self) -> int:
+        """
+        Bulk export for not-finalized blank SHP records (both exchanges):
+        saves SHP page 2 at 300 DPI to downloads/{exchange}/pdf/shp/png/blank/.
+        """
+        if self.no_db:
+            print("\n❌ --shppngbulk requires database access (--nodb not allowed)")
+            return EXIT_VALIDATION_FAILED
+
+        print("\n" + "=" * 70)
+        print(f"SHP PNG BULK MODE ({self.exchange})")
+        print("=" * 70)
+
+        sql = """
+            SELECT unique_symbol, shp_pdf_path, status, finalized_at, error_message
+            FROM ipo_processing_log
+            WHERE exchange = %s
+              AND (status IS NULL OR status <> 'FINALIZED')
+              AND (finalized_at IS NULL)
+              AND error_message LIKE %s
+            ORDER BY processed_at DESC
+        """
+        records = db.execute_query(sql, (self.exchange, '%Blank SHP%'), fetch="all") or []
+        if not records:
+            print("No not-finalized blank SHP records found.")
+            return EXIT_SUCCESS
+
+        success = 0
+        failed = 0
+        for rec in records:
+            shp_path_val = rec.get('shp_pdf_path')
+            if not shp_path_val:
+                failed += 1
+                continue
+            shp_path = Path(shp_path_val)
+            files = self.save_blank_shp_pages_png(shp_path, [2], dpi=300)
+            if files:
+                success += 1
+                rel = ", ".join(str(f.relative_to(BASE_DIR)) for f in files if str(f).startswith(str(BASE_DIR)))
+                print(f"✓ {rec.get('unique_symbol')}: {rel if rel else files[0]}")
+            else:
+                failed += 1
+                print(f"⊗ {rec.get('unique_symbol')}: failed")
+
+        print("\n" + "=" * 70)
+        print(f"Bulk complete | success={success} failed={failed} total={len(records)}")
+        print("=" * 70)
+        return EXIT_SUCCESS if failed == 0 else EXIT_VALIDATION_FAILED
 
     def validate_data(self, step_num: int) -> int:
         """Validate extracted data against rules (Step 2)"""
@@ -1270,6 +1400,8 @@ class IPOProcessor:
                 manual_override=None,
                 reason=None,
                 suppress_run_log=True,
+                shppng=self.shppng,
+                shppngbulk=False,
             )
 
             processor = IPOProcessor(args)
@@ -1320,6 +1452,8 @@ class IPOProcessor:
         # Check if rollback mode
         if self.rollback:
             return self.rollback_processing()
+        if self.shppngbulk:
+            return self.process_shppng_bulk()
         
         self.print_header()
 
@@ -1446,6 +1580,10 @@ Examples:
                        help='Detailed logging')
     parser.add_argument('--movefiles', action='store_true',
                        help='Enable file movement to finalized/ folder (disabled by default)')
+    parser.add_argument('--shppng', type=str,
+                       help='On blank SHP detection, save selected SHP page(s) as 300 DPI PNG (e.g., --shppng 2 or --shppng 2,3-5)')
+    parser.add_argument('--shppngbulk', action='store_true',
+                       help='Bulk mode: save page 2 as 300 DPI PNG for all not-finalized blank SHP records for selected exchange')
 
     # Manual override
     parser.add_argument('--manual_override', type=str,
