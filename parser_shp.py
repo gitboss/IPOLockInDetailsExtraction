@@ -9,6 +9,60 @@ from models import SHPData
 from shp_parser_production_unified import extract_shp_values_from_text_java as extract_shp_with_cascade
 
 
+def _reconcile_bse_other_shares(result: dict) -> dict:
+    """
+    Backward-compatible BSE-only reconciliation:
+    If strategy produced promoter/public + total but missing/incorrect others,
+    fill others via residual math:
+        other = total - promoter - public
+
+    This is intentionally conservative and only runs when promoter/public/total
+    are present and residual is non-negative.
+    """
+    total = result.get('total_shares')
+    promoter = result.get('promoter_shares')
+    public = result.get('public_shares')
+    other = result.get('other_shares')
+
+    if total is None or promoter is None or public is None:
+        return result
+
+    try:
+        total_i = int(total)
+        promoter_i = int(promoter)
+        public_i = int(public)
+        other_i = int(other) if other is not None else 0
+    except (TypeError, ValueError):
+        return result
+
+    if total_i <= 0 or promoter_i < 0 or public_i < 0:
+        return result
+
+    # Guard: avoid masking obviously bad parses (e.g., both zero)
+    if promoter_i == 0 and public_i == 0:
+        return result
+
+    current_sum = promoter_i + public_i + other_i
+    needs_reconcile = (other is None) or (other_i == 0) or (current_sum != total_i)
+    if not needs_reconcile:
+        return result
+
+    residual = total_i - promoter_i - public_i
+    if residual < 0:
+        return result
+
+    result = dict(result)  # don't mutate caller reference in-place
+    result['other_shares'] = residual
+    result['other_found'] = residual > 0
+    result['all_values_found'] = (
+        result.get('promoter_shares') is not None and
+        result.get('public_shares') is not None and
+        result.get('other_shares') is not None
+    )
+    result['maths_verified'] = ((promoter_i + public_i + residual) == total_i)
+    return result
+
+
 def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed: int = None, known_locked: int = None) -> SHPData:
     """
     Parse SHP TXT file using CASCADE of 8 strategies (unified for NSE and BSE)
@@ -41,6 +95,15 @@ def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed:
         lockin_locked_hint=known_locked,
         total_hint_computed=total_hint_computed  # [FALLBACK 2026-03-09]
     )
+
+    # Backward-compatible enhancement for BSE:
+    # reconcile "others" only when promoter/public/total are present.
+    path_norm = str(txt_path).lower().replace('\\', '/')
+    if '/bse/' in path_norm:
+        reconciled = _reconcile_bse_other_shares(result)
+        if reconciled is not result and reconciled.get('other_shares') != result.get('other_shares'):
+            print(f"ℹ️  BSE reconciliation: other_shares adjusted to {reconciled.get('other_shares'):,} by residual math")
+        result = reconciled
 
     # Check if extraction succeeded
     if not result.get('all_values_found'):
