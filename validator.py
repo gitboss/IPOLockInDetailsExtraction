@@ -205,7 +205,12 @@ def validate_rule5(shp: SHPData) -> ValidationResult:
     )
 
 
-def validate_rule6(lockin: LockinData, anchor_letter_url: str) -> ValidationResult:
+def validate_rule6(
+    lockin: LockinData,
+    anchor_letter_url: str,
+    exchange: str = None,
+    allotment_date=None,
+) -> ValidationResult:
     """
     RULE 6: Anchor validation
     If anchor_letter_url exists → must find anchor rows
@@ -244,9 +249,27 @@ def validate_rule6(lockin: LockinData, anchor_letter_url: str) -> ValidationResu
         passed = True
         message = "No anchor letter URL and no anchor rows (correct)"
     else:  # not has_anchor_url and has_anchor_rows
-        # Error: no anchor URL but anchor rows found
-        passed = False
-        message = f"No anchor letter URL but {anchor_count} anchor row(s) found (unexpected)"
+        # Legacy NSE relaxation:
+        # For older allotments (< 2024-12-02), do not fail when anchor rows exist
+        # but anchor letter URL is missing.
+        legacy_cutoff = "2024-12-02"
+        allotment_iso = allotment_date.isoformat() if hasattr(allotment_date, "isoformat") else (str(allotment_date) if allotment_date else None)
+        is_legacy_nse = (
+            (exchange or "").upper() == "NSE"
+            and allotment_iso is not None
+            and allotment_iso < legacy_cutoff
+        )
+
+        if is_legacy_nse:
+            passed = True
+            message = (
+                f"No anchor letter URL but {anchor_count} anchor row(s) found "
+                f"(legacy NSE exception: allotment_date {allotment_iso} < {legacy_cutoff})"
+            )
+        else:
+            # Error: no anchor URL but anchor rows found
+            passed = False
+            message = f"No anchor letter URL but {anchor_count} anchor row(s) found (unexpected)"
 
     return ValidationResult(
         rule_id="RULE6",
@@ -371,7 +394,8 @@ def validate_all_rules(
     db_computed_total: int = None,
     db_declared_total: int = None,
     parsed_declared_total: int = None,
-    allotment_date=None
+    allotment_date=None,
+    exchange: str = None,
 ) -> List[ValidationResult]:
     """
     Run all validation rules (RULE1-RULE10 except post-save DB rule)
@@ -409,7 +433,7 @@ def validate_all_rules(
     results.append(validate_rule4(shp, lockin))
 
     # Anchor validation
-    results.append(validate_rule6(lockin, anchor_letter_url))
+    results.append(validate_rule6(lockin, anchor_letter_url, exchange=exchange, allotment_date=allotment_date))
 
     # Additional lock-in integrity rules
     results.append(validate_rule7_bucket_calculated(lockin))

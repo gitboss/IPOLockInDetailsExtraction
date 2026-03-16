@@ -969,7 +969,8 @@ class IPOProcessor:
                 self.declared_total,
                 self.anchor_letter_url,
                 parsed_declared_total=self.lockin_data.declared_total if self.lockin_data else None,
-                allotment_date=self.bucket_reference_date
+                allotment_date=self.bucket_reference_date,
+                exchange=self.exchange,
             )
 
             # Apply manual overrides (if requested)
