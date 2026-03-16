@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS ipo_processing_log (
     processed_at DATETIME,
     finalized_at DATETIME,
     error_message TEXT,
+    scrip_meta JSON,
 
     -- GEMINI OCR flag (reuses sme_ipo_lockin_ocr cache)
     gemini_extracted BOOLEAN DEFAULT FALSE,

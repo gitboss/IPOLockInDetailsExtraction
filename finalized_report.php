@@ -34,9 +34,61 @@ function make_pdo(array $env): PDO
   );
 }
 
+function has_scrip_meta_column(PDO $pdo): bool
+{
+  try {
+    $stmt = $pdo->query("SHOW COLUMNS FROM ipo_processing_log LIKE 'scrip_meta'");
+    return (bool) $stmt->fetch();
+  } catch (Exception $e) {
+    return false;
+  }
+}
+
+// Lightweight API: toggle manual reviewed status from report UI
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'toggle_manual_review')) {
+  header('Content-Type: application/json');
+  try {
+    $pdo = make_pdo($env);
+    if (!has_scrip_meta_column($pdo)) {
+      throw new RuntimeException("scrip_meta column missing in ipo_processing_log");
+    }
+
+    $raw = file_get_contents('php://input');
+    $payload = json_decode($raw ?: '{}', true);
+    $id = isset($payload['id']) ? (int) $payload['id'] : 0;
+    $manual_reviewed = !empty($payload['manual_reviewed']) ? 1 : 0;
+    if ($id <= 0) {
+      throw new InvalidArgumentException("Invalid id");
+    }
+
+    $stmt = $pdo->prepare("
+      UPDATE ipo_processing_log
+      SET scrip_meta = JSON_SET(COALESCE(scrip_meta, JSON_OBJECT()), '$.manual_reviewed', CAST(:manual_reviewed AS UNSIGNED))
+      WHERE id = :id
+    ");
+    $stmt->execute([
+      ':manual_reviewed' => $manual_reviewed,
+      ':id' => $id
+    ]);
+
+    echo json_encode(['ok' => true, 'id' => $id, 'manual_reviewed' => $manual_reviewed]);
+  } catch (Exception $e) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+  }
+  exit;
+}
+
 $data_json = '[]';
 try {
   $pdo = make_pdo($env);
+  $has_scrip_meta = has_scrip_meta_column($pdo);
+  $manual_reviewed_select = $has_scrip_meta
+    ? "COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(p.scrip_meta, '$.manual_reviewed')) AS UNSIGNED), 0) AS manual_reviewed"
+    : "0 AS manual_reviewed";
+  $scrip_meta_select = $has_scrip_meta
+    ? "p.scrip_meta"
+    : "NULL AS scrip_meta";
 
   $records = $pdo->query("
     SELECT
@@ -47,6 +99,8 @@ try {
       p.validation_results, p.all_rules_passed, p.failed_rules,
       p.processed_at, p.finalized_at,
       p.error_message,
+      {$manual_reviewed_select},
+      {$scrip_meta_select},
       p.lockin_pdf_path, p.shp_pdf_path, p.lockin_png_path,
       p.lockin_txt_java_path, p.shp_txt_java_path,
       m.company_name, m.ipo_name, m.listing_date_actual,
@@ -127,6 +181,8 @@ try {
     $rec['total_shares'] = $rec['shp_total_shares'];
     $rec['shp_locked_total'] = $rec['shp_locked_shares'];
     $rec['finalized'] = !empty($rec['finalized_at']);
+    $rec['manual_reviewed'] = !empty($rec['manual_reviewed']);
+    $rec['scrip_meta'] = $rec['scrip_meta'] ? json_decode($rec['scrip_meta'], true) : null;
     $rec['manual_lock'] = false;
     $rec['locked_forever'] = false;
     $rec['total_match'] = ($rec['status'] === 'PASS' || $rec['status'] === 'SHP_PASS') ? 'OK' : 'MISMATCH';
@@ -239,6 +295,23 @@ try {
       white-space: nowrap;
     }
     .copy-chip:hover { border-color: var(--blue); }
+
+    .manual-review-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+      margin-left: 8px;
+      user-select: none;
+    }
+
+    .manual-review-wrap input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+      accent-color: var(--green);
+    }
 
     .header-right {
       margin-left: auto;
@@ -1123,6 +1196,13 @@ try {
         <option value="0">Not Finalized</option>
       </select>
     </label>
+    <label>Manual Review
+      <select id="filter-manual-reviewed">
+        <option value="">All</option>
+        <option value="1">Reviewed</option>
+        <option value="0">Not Reviewed</option>
+      </select>
+    </label>
     <label>Bucket
       <select id="filter-bucket">
         <option value="">All</option>
@@ -1480,6 +1560,10 @@ try {
           <span class="card-symbol">${s.symbol || s.unique_symbol || ''}</span>
           ${s.exchange_code ? `<span style="font-size:11px;color:var(--muted)">${s.exchange_code}</span>` : ''}
           ${pdfName ? `<div class="copy-chip" title="Click to copy lock-in filename" data-copy="${encodeURIComponent(pdfName)}" onclick="copyEncoded(this.getAttribute('data-copy'))">📄 ${pdfName}</div>` : ''}
+          <label class="manual-review-wrap" title="Mark manually reviewed">
+            <input type="checkbox" data-manual-review-id="${s.id}" ${s.manual_reviewed ? 'checked' : ''} onchange="toggleManualReviewed(this)">
+            ✓ Reviewed
+          </label>
         </div>
       </div>
       <span class="badge ex-${s.exchange || 'BSE'}">${s.exchange || ''}</span>
@@ -1550,6 +1634,7 @@ try {
       const q = document.getElementById('search').value.trim().toLowerCase();
       const exch = document.getElementById('filter-exchange').value;
       const finalizedFilter = document.getElementById('filter-finalized').value;
+      const manualReviewedFilter = document.getElementById('filter-manual-reviewed').value;
       const bucket = document.getElementById('filter-bucket').value;
       const sortBy = document.getElementById('sort-by').value;
       const hideBlankLockin = document.getElementById('hide-blank-lockin').checked;
@@ -1563,6 +1648,7 @@ try {
         }
         if (exch && (s.exchange || '').toUpperCase() !== exch) return false;
         if (finalizedFilter !== '' && String(s.finalized ? 1 : 0) !== finalizedFilter) return false;
+        if (manualReviewedFilter !== '' && String(s.manual_reviewed ? 1 : 0) !== manualReviewedFilter) return false;
         if (bucket && !(s.rows || []).some(r => (r.lock_bucket || '').toLowerCase() === bucket)) return false;
         
         // [BLANK-TXT 2026-03-09] Hide blank TXT files
@@ -1587,6 +1673,32 @@ try {
         return;
       }
       body.innerHTML = scrips.map(s => renderScripCard(s)).join('');
+    }
+
+    async function toggleManualReviewed(el) {
+      const id = Number(el.getAttribute('data-manual-review-id') || 0);
+      if (!id) return;
+      const manualReviewed = !!el.checked;
+      el.disabled = true;
+      try {
+        const res = await fetch('finalized_report.php?action=toggle_manual_review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, manual_reviewed: manualReviewed })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || `HTTP ${res.status}`);
+        }
+        const s = allScrips.find(x => Number(x.id) === id);
+        if (s) s.manual_reviewed = !!data.manual_reviewed;
+      } catch (err) {
+        el.checked = !manualReviewed;
+        alert(`Failed to save manual review status: ${err.message}`);
+      } finally {
+        el.disabled = false;
+        render();
+      }
     }
 
     // ── Detail overlay (read-only) ────────────────────────────────────────────────
@@ -1716,7 +1828,7 @@ try {
       if (e.target === document.getElementById('edit-overlay')) closeEditOverlay();
     });
 
-    ['search', 'filter-exchange', 'filter-finalized', 'filter-bucket', 'sort-by'].forEach(id => {
+    ['search', 'filter-exchange', 'filter-finalized', 'filter-manual-reviewed', 'filter-bucket', 'sort-by'].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         el.addEventListener('input', render);
