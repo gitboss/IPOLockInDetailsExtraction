@@ -9,6 +9,19 @@ from models import SHPData
 from shp_parser_production_unified import extract_shp_values_from_text_java as extract_shp_with_cascade
 
 
+def _is_result_math_valid(result: dict) -> bool:
+    total = result.get('total_shares')
+    promoter = result.get('promoter_shares')
+    public = result.get('public_shares')
+    other = result.get('other_shares')
+    if total is None or promoter is None or public is None or other is None:
+        return False
+    try:
+        return int(promoter) + int(public) + int(other) == int(total)
+    except (TypeError, ValueError):
+        return False
+
+
 def _reconcile_other_shares(result: dict) -> dict:
     """
     Backward-compatible reconciliation:
@@ -96,9 +109,35 @@ def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed:
         total_hint_computed=total_hint_computed  # [FALLBACK 2026-03-09]
     )
 
+    path_norm = str(txt_path).lower().replace('\\', '/')
+
+    # Backward-compatible dual-hint arbitration (BSE only):
+    # If DB total and computed total conflict, and selected result aligns to DB total,
+    # try one alternate parse anchored to computed total. Switch only when alternate is
+    # mathematically valid and aligns to computed total.
+    if (
+        '/bse/' in path_norm
+        and known_total is not None
+        and total_hint_computed is not None
+        and known_total != total_hint_computed
+        and result.get('total_shares') == known_total
+    ):
+        alt_result = extract_shp_with_cascade(
+            text=text,
+            annexure_total=total_hint_computed,
+            lockin_locked_hint=known_locked,
+            total_hint_computed=known_total
+        )
+        alt_result = _reconcile_other_shares(alt_result)
+        if alt_result.get('total_shares') == total_hint_computed and _is_result_math_valid(alt_result):
+            print(
+                f"ℹ️  BSE dual-hint arbitration: switched SHP total from DB hint "
+                f"{known_total:,} to computed hint {total_hint_computed:,}"
+            )
+            result = alt_result
+
     # Backward-compatible enhancement for NSE/BSE:
     # reconcile "others" only when promoter/public/total are present.
-    path_norm = str(txt_path).lower().replace('\\', '/')
     if '/bse/' in path_norm or '/nse/' in path_norm:
         reconciled = _reconcile_other_shares(result)
         if reconciled is not result and reconciled.get('other_shares') != result.get('other_shares'):
