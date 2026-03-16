@@ -257,14 +257,14 @@ def validate_rule6(
         is_legacy_nse = (
             (exchange or "").upper() == "NSE"
             and allotment_iso is not None
-            and allotment_iso < legacy_cutoff
+            and allotment_iso <= legacy_cutoff
         )
 
         if is_legacy_nse:
             passed = True
             message = (
                 f"No anchor letter URL but {anchor_count} anchor row(s) found "
-                f"(legacy NSE exception: allotment_date {allotment_iso} < {legacy_cutoff})"
+                f"(legacy NSE exception: allotment_date {allotment_iso} <= {legacy_cutoff})"
             )
         else:
             # Error: no anchor URL but anchor rows found
