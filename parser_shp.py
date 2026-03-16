@@ -9,9 +9,9 @@ from models import SHPData
 from shp_parser_production_unified import extract_shp_values_from_text_java as extract_shp_with_cascade
 
 
-def _reconcile_bse_other_shares(result: dict) -> dict:
+def _reconcile_other_shares(result: dict) -> dict:
     """
-    Backward-compatible BSE-only reconciliation:
+    Backward-compatible reconciliation:
     If strategy produced promoter/public + total but missing/incorrect others,
     fill others via residual math:
         other = total - promoter - public
@@ -96,13 +96,14 @@ def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed:
         total_hint_computed=total_hint_computed  # [FALLBACK 2026-03-09]
     )
 
-    # Backward-compatible enhancement for BSE:
+    # Backward-compatible enhancement for NSE/BSE:
     # reconcile "others" only when promoter/public/total are present.
     path_norm = str(txt_path).lower().replace('\\', '/')
-    if '/bse/' in path_norm:
-        reconciled = _reconcile_bse_other_shares(result)
+    if '/bse/' in path_norm or '/nse/' in path_norm:
+        reconciled = _reconcile_other_shares(result)
         if reconciled is not result and reconciled.get('other_shares') != result.get('other_shares'):
-            print(f"ℹ️  BSE reconciliation: other_shares adjusted to {reconciled.get('other_shares'):,} by residual math")
+            ex = "BSE" if '/bse/' in path_norm else "NSE"
+            print(f"ℹ️  {ex} reconciliation: other_shares adjusted to {reconciled.get('other_shares'):,} by residual math")
         result = reconciled
 
     # Check if extraction succeeded
