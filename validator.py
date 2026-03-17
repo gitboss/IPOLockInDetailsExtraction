@@ -249,22 +249,23 @@ def validate_rule6(
         passed = True
         message = "No anchor letter URL and no anchor rows (correct)"
     else:  # not has_anchor_url and has_anchor_rows
-        # Legacy NSE relaxation:
-        # For older allotments (< 2024-12-02), do not fail when anchor rows exist
+        # Legacy NSE/BSE relaxation:
+        # For older allotments (<= 2024-12-02), do not fail when anchor rows exist
         # but anchor letter URL is missing.
         legacy_cutoff = "2024-12-02"
         allotment_iso = allotment_date.isoformat() if hasattr(allotment_date, "isoformat") else (str(allotment_date) if allotment_date else None)
-        is_legacy_nse = (
-            (exchange or "").upper() == "NSE"
+        ex_upper = (exchange or "").upper()
+        is_legacy_exchange = (
+            ex_upper in {"NSE", "BSE"}
             and allotment_iso is not None
             and allotment_iso <= legacy_cutoff
         )
 
-        if is_legacy_nse:
+        if is_legacy_exchange:
             passed = True
             message = (
                 f"No anchor letter URL but {anchor_count} anchor row(s) found "
-                f"(legacy NSE exception: allotment_date {allotment_iso} <= {legacy_cutoff})"
+                f"(legacy {ex_upper} exception: allotment_date {allotment_iso} <= {legacy_cutoff})"
             )
         else:
             # Error: no anchor URL but anchor rows found
