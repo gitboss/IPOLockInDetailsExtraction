@@ -312,6 +312,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'renam
   exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'update_bucket')) {
+  header('Content-Type: application/json');
+  try {
+    $pdo = make_pdo($env);
+    $raw = file_get_contents('php://input');
+    $payload = json_decode($raw ?: '{}', true);
+    $processingId = isset($payload['processing_id']) ? (int) $payload['processing_id'] : 0;
+    $rowId = isset($payload['row_id']) ? (int) $payload['row_id'] : 0;
+    $bucket = strtolower(trim((string) ($payload['bucket'] ?? '')));
+    $allowed = ['3_year_plus', '2_year_plus', '1_year_plus', '1_year_minus', 'anchor_90', 'anchor_30', 'free'];
+
+    if ($processingId <= 0 || $rowId <= 0 || !in_array($bucket, $allowed, true)) {
+      throw new InvalidArgumentException("Invalid payload");
+    }
+
+    $stmt = $pdo->prepare("
+      SELECT p.finalized_at
+      FROM ipo_lockin_rows r
+      INNER JOIN ipo_processing_log p ON p.id = r.processing_log_id
+      WHERE r.id = :row_id AND r.processing_log_id = :processing_id
+      LIMIT 1
+    ");
+    $stmt->execute([
+      ':row_id' => $rowId,
+      ':processing_id' => $processingId,
+    ]);
+    $chk = $stmt->fetch();
+    if (!$chk) {
+      throw new RuntimeException("Row not found");
+    }
+    if (!empty($chk['finalized_at'])) {
+      throw new RuntimeException("Finalized scrip rows cannot be edited");
+    }
+
+    $upd = $pdo->prepare("UPDATE ipo_lockin_rows SET bucket = :bucket WHERE id = :row_id AND processing_log_id = :processing_id");
+    $upd->execute([
+      ':bucket' => $bucket,
+      ':row_id' => $rowId,
+      ':processing_id' => $processingId,
+    ]);
+
+    echo json_encode(['ok' => true, 'processing_id' => $processingId, 'row_id' => $rowId, 'bucket' => $bucket]);
+  } catch (Exception $e) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+  }
+  exit;
+}
+
 $data_json = '[]';
 try {
   $pdo = make_pdo($env);
@@ -372,6 +421,7 @@ try {
 
   $ungrouped_raw = $pdo->query("
     SELECT processing_log_id,
+           id               AS row_id,
            lockin_date_from AS lock_from,
            lockin_date_to   AS lock_upto,
            status           AS row_class,
@@ -1915,6 +1965,99 @@ try {
       body.innerHTML = scrips.map(s => renderScripCard(s)).join('');
     }
 
+    function renderEditableBucketSpan(bucketRaw, processingId, rowId, isFinalized) {
+      const b = (bucketRaw || 'free').toLowerCase();
+      const safeBucket = b.replace(/[^a-z0-9_]/g, '-');
+      const label = fmtBucket(b);
+      if (isFinalized || !rowId) {
+        return `<span class="bucket-pill bk-${safeBucket}">${label}</span>`;
+      }
+      return `<span class="bucket-pill bk-${safeBucket}" data-bucket="${b}" data-row-id="${rowId}" title="Double-click to change bucket" ondblclick="beginBucketEdit(this, ${processingId}, ${rowId})">${label}</span>`;
+    }
+
+    function beginBucketEdit(el, processingId, rowId) {
+      if (!el || !processingId || !rowId) return;
+      const current = (el.getAttribute('data-bucket') || 'free').toLowerCase();
+      const options = [
+        'anchor_30',
+        'anchor_90',
+        '1_year_minus',
+        '1_year_plus',
+        '2_year_plus',
+        '3_year_plus',
+        'free'
+      ];
+      const select = document.createElement('select');
+      select.style.fontSize = '11px';
+      select.style.padding = '1px 4px';
+      select.style.background = 'var(--card)';
+      select.style.color = 'var(--text)';
+      select.style.border = '1px solid var(--border2)';
+      select.style.borderRadius = '4px';
+
+      options.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = fmtBucket(v);
+        if (v === current) o.selected = true;
+        select.appendChild(o);
+      });
+
+      const parent = el.parentNode;
+      if (!parent) return;
+      parent.replaceChild(select, el);
+      select.focus();
+
+      let committed = false;
+      const restore = (bucketToShow) => {
+        if (!select.parentNode) return;
+        const span = document.createElement('span');
+        span.className = `bucket-pill bk-${(bucketToShow || current).replace(/[^a-z0-9_]/g, '-')}`;
+        span.setAttribute('data-bucket', bucketToShow || current);
+        span.setAttribute('data-row-id', String(rowId));
+        span.title = 'Double-click to change bucket';
+        span.textContent = fmtBucket(bucketToShow || current);
+        span.ondblclick = () => beginBucketEdit(span, processingId, rowId);
+        select.parentNode.replaceChild(span, select);
+      };
+
+      select.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          committed = true;
+          restore(current);
+        }
+      });
+
+      select.addEventListener('blur', () => {
+        if (!committed) restore(current);
+      });
+
+      select.addEventListener('change', async () => {
+        committed = true;
+        const nextBucket = select.value;
+        try {
+          const res = await fetch('finalized_report.php?action=update_bucket', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              processing_id: processingId,
+              row_id: rowId,
+              bucket: nextBucket
+            })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            throw new Error((data && data.error) || `HTTP ${res.status}`);
+          }
+          restore(nextBucket);
+          setTimeout(() => location.reload(), 120);
+        } catch (err) {
+          alert(`Bucket update failed: ${err.message}`);
+          restore(current);
+        }
+      });
+    }
+
     async function toggleManualReviewed(el) {
       const id = Number(el.getAttribute('data-manual-review-id') || 0);
       if (!id) return;
@@ -2013,7 +2156,7 @@ try {
           <td>${fmt(r.shares)}${(+r._count || 0) > 1 ? ` <small style="color:var(--muted)">(${r._count})</small>` : ''}</td>
           <td>${r.lock_from || '-'}</td>
           <td>${r.lock_upto || '-'}</td>
-          <td><span class="bucket-pill bk-${(r.lock_bucket || 'free').replace(/[^a-z0-9_]/g, '-')}">${fmtBucket(r.lock_bucket || '')}</span></td>
+          <td>${renderEditableBucketSpan(r.lock_bucket || 'free', s.id, r.row_id || 0, !!s.finalized)}</td>
           <td style="color:var(--muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.type_raw || '').replace(/"/g, '&quot;')}">${r.type_raw || '-'}</td>
         `;
         tbody.appendChild(tr);
