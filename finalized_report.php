@@ -510,12 +510,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
     $allPassed = ($passCount === $totalRules);
     $failedCsv = implode(',', $failed);
     $validationJson = json_encode($ruleResults, JSON_UNESCAPED_UNICODE);
+    $errorMessage = null;
+    if (!$allPassed) {
+      $parts = [];
+      foreach ($failed as $fr) {
+        $msg = $ruleResults[$fr]['message'] ?? '';
+        $parts[] = $fr . ": " . $msg;
+      }
+      $errorMessage = "Finalization skipped: Not all validation rules passed";
+      if ($parts) {
+        $errorMessage .= " | " . implode(" | ", $parts);
+      }
+    }
 
     $upd = $pdo->prepare("
       UPDATE ipo_processing_log
       SET validation_results = :validation_results,
           all_rules_passed = :all_rules_passed,
           failed_rules = :failed_rules,
+          error_message = :error_message,
           status = 'VALIDATING',
           processed_at = NOW()
       WHERE id = :id
@@ -524,6 +537,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
       ':validation_results' => $validationJson,
       ':all_rules_passed' => $allPassed ? 1 : 0,
       ':failed_rules' => $failedCsv !== '' ? $failedCsv : null,
+      ':error_message' => $errorMessage,
       ':id' => $id,
     ]);
 
