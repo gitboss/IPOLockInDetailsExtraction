@@ -5,6 +5,7 @@ Uses CASCADE of 8 strategies from production code
 """
 
 from pathlib import Path
+import re
 from models import SHPData
 from shp_parser_production_unified import extract_shp_values_from_text_java as extract_shp_with_cascade
 
@@ -76,6 +77,112 @@ def _reconcile_other_shares(result: dict) -> dict:
     return result
 
 
+def _extract_int_tokens(line: str) -> list[int]:
+    vals = []
+    for m in re.findall(r'(?<!\d)\d[\d,]*(?!\d)', line or ''):
+        try:
+            vals.append(int(m.replace(',', '')))
+        except ValueError:
+            pass
+    return vals
+
+
+def _number_exists_in_text(text: str, value: int) -> bool:
+    if value is None:
+        return False
+    target = int(value)
+    for token in _extract_int_tokens(text):
+        if token == target:
+            return True
+    return False
+
+
+def _looks_implausible_shp_parse(result: dict, known_total: int = None, known_locked: int = None) -> bool:
+    total = result.get('total_shares')
+    promoter = result.get('promoter_shares')
+    public = result.get('public_shares')
+    shp_locked = result.get('shp_locked_total')
+
+    try:
+        total_i = int(total) if total is not None else 0
+        promoter_i = int(promoter) if promoter is not None else 0
+        public_i = int(public) if public is not None else 0
+        shp_locked_i = int(shp_locked) if shp_locked is not None else 0
+        known_total_i = int(known_total) if known_total is not None else None
+        known_locked_i = int(known_locked) if known_locked is not None else None
+    except (TypeError, ValueError):
+        return True
+
+    # Clearly suspicious: tiny promoter/public against very large total.
+    if total_i >= 100000 and (promoter_i + public_i) > 0 and (promoter_i + public_i) <= 10000:
+        return True
+
+    # If hints are present and parse deviates strongly, allow recovery attempt.
+    if known_total_i is not None and total_i > 0 and total_i != known_total_i:
+        return True
+    if known_locked_i is not None and shp_locked_i > 0 and shp_locked_i != known_locked_i:
+        return True
+
+    return not _is_result_math_valid(result)
+
+
+def _recover_from_ab_total_lines(text: str, declared_total: int, known_locked: int, base_result: dict) -> dict | None:
+    lines = text.splitlines()
+    a_line = None
+    b_line = None
+    total_line = None
+
+    for ln in lines:
+        l = ln.strip()
+        if not l:
+            continue
+        if a_line is None and re.search(r'\(A\)', l, re.IGNORECASE) and re.search(r'promoter', l, re.IGNORECASE):
+            a_line = l
+        if b_line is None and re.search(r'\(B\)', l, re.IGNORECASE) and re.search(r'public', l, re.IGNORECASE):
+            b_line = l
+        if total_line is None and re.search(r'total\s*a\+b', l, re.IGNORECASE):
+            total_line = l
+        elif total_line is None and re.match(r'^\s*total\b', l, re.IGNORECASE):
+            total_line = l
+
+    if not a_line or not b_line:
+        return None
+
+    a_nums = _extract_int_tokens(a_line)
+    b_nums = _extract_int_tokens(b_line)
+    if not a_nums or not b_nums:
+        return None
+
+    promoter = max(a_nums)
+    public = max(b_nums)
+    total = int(declared_total)
+    others = total - promoter - public
+    if others < 0:
+        return None
+
+    recovered = dict(base_result)
+    recovered['promoter_shares'] = promoter
+    recovered['public_shares'] = public
+    recovered['other_shares'] = others
+    recovered['total_shares'] = total
+    recovered['promoter_found'] = True
+    recovered['public_found'] = True
+    recovered['other_found'] = True
+    recovered['all_values_found'] = True
+    recovered['maths_verified'] = True
+    recovered['strategy_used'] = f"{base_result.get('strategy_used') or 'unknown'}+hint_recovery"
+
+    # Keep locked shares conservative: prefer known_locked only when explicitly present in text.
+    if known_locked is not None and _number_exists_in_text(text, int(known_locked)):
+        recovered['shp_locked_total'] = int(known_locked)
+    elif total_line:
+        t_nums = _extract_int_tokens(total_line)
+        if t_nums:
+            recovered['shp_locked_total'] = max(t_nums)
+
+    return recovered
+
+
 def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed: int = None, known_locked: int = None) -> SHPData:
     """
     Parse SHP TXT file using CASCADE of 8 strategies (unified for NSE and BSE)
@@ -144,6 +251,21 @@ def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed:
             ex = "BSE" if '/bse/' in path_norm else "NSE"
             print(f"ℹ️  {ex} reconciliation: other_shares adjusted to {reconciled.get('other_shares'):,} by residual math")
         result = reconciled
+
+    # Backward-compatible hint recovery:
+    # Run only after normal cascade/reconciliation and only when current parse looks implausible.
+    # Guarded by explicit hint existence in SHP text to avoid changing normal successful cases.
+    if known_total is not None and known_locked is not None:
+        declared_exists = _number_exists_in_text(text, int(known_total))
+        locked_exists = _number_exists_in_text(text, int(known_locked))
+        if declared_exists and locked_exists and _looks_implausible_shp_parse(result, known_total, known_locked):
+            recovered = _recover_from_ab_total_lines(text, int(known_total), int(known_locked), result)
+            if recovered and _is_result_math_valid(recovered):
+                print(
+                    "ℹ️  SHP hint recovery applied: declared+locked hints found in SHP text; "
+                    "recovered promoter/public/others from A/B/Total lines"
+                )
+                result = recovered
 
     # Check if extraction succeeded
     if not result.get('all_values_found'):
