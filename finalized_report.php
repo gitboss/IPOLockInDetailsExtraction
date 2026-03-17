@@ -361,6 +361,187 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'updat
   exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'revalidate_snapshot')) {
+  header('Content-Type: application/json');
+  try {
+    $pdo = make_pdo($env);
+    $raw = file_get_contents('php://input');
+    $payload = json_decode($raw ?: '{}', true);
+    $id = isset($payload['id']) ? (int) $payload['id'] : 0;
+    if ($id <= 0) {
+      throw new InvalidArgumentException("Invalid id");
+    }
+
+    $stmt = $pdo->prepare("
+      SELECT p.id, p.exchange, p.unique_symbol, p.status, p.finalized_at,
+             p.computed_total, p.locked_total, p.free_total,
+             p.shp_total_shares, p.shp_locked_shares, p.shp_promoter_shares, p.shp_public_shares, p.shp_others_shares,
+             p.allotment_date, p.declared_total, p.anchor_letter_url
+      FROM ipo_processing_log p
+      WHERE p.id = :id
+      LIMIT 1
+    ");
+    $stmt->execute([':id' => $id]);
+    $rec = $stmt->fetch();
+    if (!$rec) {
+      throw new RuntimeException("Record not found");
+    }
+    if (!empty($rec['finalized_at'])) {
+      throw new RuntimeException("Finalized records cannot be revalidated from overlay");
+    }
+
+    $rowsStmt = $pdo->prepare("
+      SELECT shares, status, bucket, lockin_date_from, lockin_date_to
+      FROM ipo_lockin_rows
+      WHERE processing_log_id = :id
+      ORDER BY row_order ASC, id ASC
+    ");
+    $rowsStmt->execute([':id' => $id]);
+    $rows = $rowsStmt->fetchAll();
+
+    $computed = (int) ($rec['computed_total'] ?? 0);
+    $locked = (int) ($rec['locked_total'] ?? 0);
+    $free = (int) ($rec['free_total'] ?? 0);
+    $declared = (int) ($rec['declared_total'] ?? 0);
+    $shpTotal = (int) ($rec['shp_total_shares'] ?? 0);
+    $shpLocked = (int) ($rec['shp_locked_shares'] ?? 0);
+    $promoter = (int) ($rec['shp_promoter_shares'] ?? 0);
+    $public = (int) ($rec['shp_public_shares'] ?? 0);
+    $others = (int) ($rec['shp_others_shares'] ?? 0);
+
+    $ruleResults = [];
+    $failed = [];
+    $passCount = 0;
+
+    $addRule = function($idRule, $passed, $message, $expected = null, $actual = null) use (&$ruleResults, &$failed, &$passCount) {
+      $ruleResults[$idRule] = [
+        'passed' => (bool) $passed,
+        'message' => (string) $message,
+        'expected' => $expected,
+        'actual' => $actual,
+      ];
+      if ($passed) $passCount++;
+      else $failed[] = $idRule;
+    };
+
+    // RULE1
+    $r1 = ($locked + $free) === $computed;
+    $addRule('RULE1', $r1, "Locked (" . number_format($locked) . ") + Free (" . number_format($free) . ") = " . number_format($locked + $free) . (($r1 ? " ==" : " !=") . " Computed Total (" . number_format($computed) . ")"), $computed, $locked + $free);
+
+    // RULE2 (snapshot, strict equality only)
+    $r2 = ($computed === $declared);
+    $addRule('RULE2', $r2, "Computed Total (" . number_format($computed) . ")" . ($r2 ? " ==" : " !=") . " Declared Total (" . number_format($declared) . ")", $declared, $computed);
+
+    // RULE5
+    $sumShp = $promoter + $public + $others;
+    $r5 = ($sumShp === $shpTotal);
+    $addRule('RULE5', $r5, "Promoter (" . number_format($promoter) . ") + Public (" . number_format($public) . ") + Others (" . number_format($others) . ") = " . number_format($sumShp) . ($r5 ? " ==" : " !=") . " SHP Total (" . number_format($shpTotal) . ")", $shpTotal, $sumShp);
+
+    // RULE3
+    $r3 = ($shpTotal === $computed);
+    $addRule('RULE3', $r3, "SHP Total (" . number_format($shpTotal) . ")" . ($r3 ? " ==" : " !=") . " Lock-in Total (" . number_format($computed) . ")", $computed, $shpTotal);
+
+    // RULE4
+    $r4 = ($shpLocked === $locked);
+    $addRule('RULE4', $r4, "SHP Locked (" . number_format($shpLocked) . ")" . ($r4 ? " ==" : " !=") . " Lock-in Locked (" . number_format($locked) . ")", $locked, $shpLocked);
+
+    // RULE6
+    $anchor30 = 0;
+    $anchor90 = 0;
+    $badRule7 = 0;
+    $badRule8 = 0;
+    $badRule10 = 0;
+    $allotment = !empty($rec['allotment_date']) ? $rec['allotment_date'] : null;
+    $legacyCutoff = '2024-12-02';
+    $ex = strtoupper((string) ($rec['exchange'] ?? ''));
+    foreach ($rows as $rw) {
+      $bucket = strtolower((string) ($rw['bucket'] ?? ''));
+      $status = strtoupper((string) ($rw['status'] ?? ''));
+      if ($bucket === 'anchor_30') $anchor30++;
+      if ($bucket === 'anchor_90') $anchor90++;
+
+      if ($status === 'LOCKED') {
+        $to = $rw['lockin_date_to'] ?? null;
+        $from = $rw['lockin_date_from'] ?? null;
+        if ($to && $bucket === 'free') $badRule7++;
+        if (!$to) {
+          $badRule10++;
+        } else {
+          $start = $from ?: $allotment;
+          if ($start) {
+            $d1 = strtotime((string) $start);
+            $d2 = strtotime((string) $to);
+            if ($d1 !== false && $d2 !== false && $d2 < $d1) $badRule8++;
+          }
+        }
+      }
+    }
+    $hasAnchorRows = ($anchor30 + $anchor90) > 0;
+    $hasAnchorUrl = !empty(trim((string) ($rec['anchor_letter_url'] ?? '')));
+    $isLegacy = (!empty($allotment) && $allotment <= $legacyCutoff && in_array($ex, ['NSE', 'BSE'], true));
+    if ($hasAnchorUrl && $anchor30 > 0 && $anchor90 > 0) {
+      $addRule('RULE6', true, "Anchor letter URL exists and both anchor buckets found (anchor_30={$anchor30}, anchor_90={$anchor90})", 1, $anchor30 + $anchor90);
+    } elseif ($hasAnchorUrl) {
+      if ($isLegacy) {
+        $addRule('RULE6', true, "Anchor letter URL exists but missing required anchor bucket(s): " .
+          ($anchor30 === 0 && $anchor90 === 0 ? "anchor_30, anchor_90" : ($anchor30 === 0 ? "anchor_30" : "anchor_90")) .
+          " (anchor_30={$anchor30}, anchor_90={$anchor90}) (legacy {$ex} exception: allotment_date {$allotment} <= {$legacyCutoff})", 1, $anchor30 + $anchor90);
+      } else {
+        $addRule('RULE6', false, "Anchor letter URL exists but missing required anchor bucket(s): " .
+          ($anchor30 === 0 && $anchor90 === 0 ? "anchor_30, anchor_90" : ($anchor30 === 0 ? "anchor_30" : "anchor_90")) .
+          " (anchor_30={$anchor30}, anchor_90={$anchor90})", 1, $anchor30 + $anchor90);
+      }
+    } elseif (!$hasAnchorUrl && !$hasAnchorRows) {
+      $addRule('RULE6', true, "No anchor letter URL and no anchor rows (correct)", 0, 0);
+    } else {
+      if ($isLegacy) {
+        $addRule('RULE6', true, "No anchor letter URL but " . ($anchor30 + $anchor90) . " anchor row(s) found (legacy {$ex} exception: allotment_date {$allotment} <= {$legacyCutoff})", 0, $anchor30 + $anchor90);
+      } else {
+        $addRule('RULE6', false, "No anchor letter URL but " . ($anchor30 + $anchor90) . " anchor row(s) found (unexpected)", 0, $anchor30 + $anchor90);
+      }
+    }
+
+    // RULE7 / RULE8 / RULE10
+    $addRule('RULE7', $badRule7 === 0, $badRule7 === 0 ? "All locked rows with lock-in dates have non-free buckets" : "Found {$badRule7} locked row(s) with lock-in date but bucket=free", 0, $badRule7);
+    $addRule('RULE8', $badRule8 === 0, $badRule8 === 0 ? "No negative lock-period rows found" : "Found {$badRule8} row(s) with negative lock period", 0, $badRule8);
+    $addRule('RULE10', $badRule10 === 0, $badRule10 === 0 ? "All locked rows have valid lock-in upto dates" : "Found {$badRule10} locked row(s) with missing/invalid lock-in upto date", 0, $badRule10);
+
+    $totalRules = count($ruleResults);
+    $allPassed = ($passCount === $totalRules);
+    $failedCsv = implode(',', $failed);
+    $validationJson = json_encode($ruleResults, JSON_UNESCAPED_UNICODE);
+
+    $upd = $pdo->prepare("
+      UPDATE ipo_processing_log
+      SET validation_results = :validation_results,
+          all_rules_passed = :all_rules_passed,
+          failed_rules = :failed_rules,
+          status = 'VALIDATING',
+          processed_at = NOW()
+      WHERE id = :id
+    ");
+    $upd->execute([
+      ':validation_results' => $validationJson,
+      ':all_rules_passed' => $allPassed ? 1 : 0,
+      ':failed_rules' => $failedCsv !== '' ? $failedCsv : null,
+      ':id' => $id,
+    ]);
+
+    echo json_encode([
+      'ok' => true,
+      'id' => $id,
+      'all_rules_passed' => $allPassed,
+      'passed_rules' => $passCount,
+      'total_rules' => $totalRules,
+      'failed_rules' => $failed,
+    ]);
+  } catch (Exception $e) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+  }
+  exit;
+}
+
 $data_json = '[]';
 try {
   $pdo = make_pdo($env);
@@ -1552,6 +1733,7 @@ try {
     <div class="edit-panel" id="edit-right">
       <div class="edit-panel-header">
         📋 Detail — <span id="edit-symbol-label" style="color:var(--accent)"></span>
+        <button class="edit-btn" id="btn-revalidate-overlay" onclick="revalidateCurrentScrip()" title="ReValidate current snapshot (no re-parse)">♻ ReValidate</button>
         <button class="edit-close-btn" onclick="closeEditOverlay()" title="Close">✕</button>
       </div>
       <div id="edit-form-wrap">
@@ -2035,6 +2217,15 @@ try {
       select.addEventListener('change', async () => {
         committed = true;
         const nextBucket = select.value;
+        if (nextBucket === current) {
+          restore(current);
+          return;
+        }
+        const ok = confirm(`Do you really wish to change the bucket from "${fmtBucket(current)}" to "${fmtBucket(nextBucket)}"?`);
+        if (!ok) {
+          restore(current);
+          return;
+        }
         try {
           const res = await fetch('finalized_report.php?action=update_bucket', {
             method: 'POST',
@@ -2056,6 +2247,40 @@ try {
           restore(current);
         }
       });
+    }
+
+    async function revalidateCurrentScrip() {
+      if (!_editScripId) return;
+      const s = allScrips.find(x => x.id == _editScripId);
+      if (!s) return;
+      if (s.finalized) {
+        alert('Finalized scrip cannot be revalidated from overlay.');
+        return;
+      }
+      const c1 = confirm('ReValidate this scrip using current edited DB rows (no re-parse)?');
+      if (!c1) return;
+      const c2 = confirm('Please confirm again: This will overwrite current validation results for this scrip.');
+      if (!c2) return;
+
+      const btn = document.getElementById('btn-revalidate-overlay');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch('finalized_report.php?action=revalidate_snapshot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: Number(_editScripId) })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || `HTTP ${res.status}`);
+        }
+        alert(`ReValidate complete: ${data.passed_rules}/${data.total_rules} rules passed.`);
+        location.reload();
+      } catch (err) {
+        alert(`ReValidate failed: ${err.message}`);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     async function toggleManualReviewed(el) {
@@ -2128,6 +2353,8 @@ try {
       ov.style.display = 'flex';
 
       document.getElementById('edit-symbol-label').textContent = s.unique_symbol || s.symbol || `#${scripId}`;
+      const revalBtn = document.getElementById('btn-revalidate-overlay');
+      if (revalBtn) revalBtn.disabled = !!s.finalized;
 
       // Populate read-only fields
       document.getElementById('ef-computed').value = fmt(s.computed_total);
