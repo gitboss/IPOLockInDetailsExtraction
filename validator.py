@@ -223,6 +223,14 @@ def validate_rule6(
 
     # Check anchor_letter_url
     has_anchor_url = anchor_letter_url is not None and anchor_letter_url.strip() != ''
+    legacy_cutoff = "2024-12-02"
+    allotment_iso = allotment_date.isoformat() if hasattr(allotment_date, "isoformat") else (str(allotment_date) if allotment_date else None)
+    ex_upper = (exchange or "").upper()
+    is_legacy_bse = (
+        ex_upper == "BSE"
+        and allotment_iso is not None
+        and allotment_iso <= legacy_cutoff
+    )
 
     # Validation logic
     if has_anchor_url and anchor_30_count > 0 and anchor_90_count > 0:
@@ -234,16 +242,24 @@ def validate_rule6(
         )
     elif has_anchor_url:
         # Error: anchor URL exists but one/both anchor bucket(s) missing
-        passed = False
         missing = []
         if anchor_30_count == 0:
             missing.append("anchor_30")
         if anchor_90_count == 0:
             missing.append("anchor_90")
-        message = (
-            "Anchor letter URL exists but missing required anchor bucket(s): "
-            f"{', '.join(missing)} (anchor_30={anchor_30_count}, anchor_90={anchor_90_count})"
-        )
+        if is_legacy_bse:
+            passed = True
+            message = (
+                "Anchor letter URL exists but missing required anchor bucket(s): "
+                f"{', '.join(missing)} (anchor_30={anchor_30_count}, anchor_90={anchor_90_count}) "
+                f"(legacy BSE exception: allotment_date {allotment_iso} <= {legacy_cutoff})"
+            )
+        else:
+            passed = False
+            message = (
+                "Anchor letter URL exists but missing required anchor bucket(s): "
+                f"{', '.join(missing)} (anchor_30={anchor_30_count}, anchor_90={anchor_90_count})"
+            )
     elif not has_anchor_url and not has_anchor_rows:
         # Expected: no anchor URL and no anchor rows
         passed = True
@@ -252,9 +268,6 @@ def validate_rule6(
         # Legacy NSE/BSE relaxation:
         # For older allotments (<= 2024-12-02), do not fail when anchor rows exist
         # but anchor letter URL is missing.
-        legacy_cutoff = "2024-12-02"
-        allotment_iso = allotment_date.isoformat() if hasattr(allotment_date, "isoformat") else (str(allotment_date) if allotment_date else None)
-        ex_upper = (exchange or "").upper()
         is_legacy_exchange = (
             ex_upper in {"NSE", "BSE"}
             and allotment_iso is not None
