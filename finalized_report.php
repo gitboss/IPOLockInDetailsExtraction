@@ -376,8 +376,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
       SELECT p.id, p.exchange, p.unique_symbol, p.status, p.finalized_at,
              p.computed_total, p.locked_total, p.free_total,
              p.shp_total_shares, p.shp_locked_shares, p.shp_promoter_shares, p.shp_public_shares, p.shp_others_shares,
-             p.allotment_date, p.declared_total, p.anchor_letter_url
+             p.allotment_date, p.declared_total,
+             COALESCE(p.anchor_letter_url, m.anchor_letter_url) AS anchor_letter_url
       FROM ipo_processing_log p
+      LEFT JOIN sme_ipo_master m
+        ON (p.exchange COLLATE utf8mb4_unicode_ci = 'BSE' COLLATE utf8mb4_unicode_ci
+            AND CAST(m.bse_script_code AS CHAR) COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(p.unique_symbol, ':', -1) COLLATE utf8mb4_unicode_ci)
+        OR (p.exchange COLLATE utf8mb4_unicode_ci = 'NSE' COLLATE utf8mb4_unicode_ci
+            AND UPPER(CAST(m.nse_symbol AS CHAR)) COLLATE utf8mb4_unicode_ci = UPPER(SUBSTRING_INDEX(p.unique_symbol, ':', -1)) COLLATE utf8mb4_unicode_ci)
       WHERE p.id = :id
       LIMIT 1
     ");
