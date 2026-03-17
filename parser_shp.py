@@ -189,6 +189,40 @@ def _recover_from_ab_total_lines(
     return recovered
 
 
+def _apply_locked_hint_fallback(result: dict, text: str, known_locked: int | None) -> dict:
+    """
+    Conservative fallback for SHP locked shares:
+    if parsed SHP locked appears as a tiny artifact (e.g. from split percent token)
+    and known_locked exists verbatim in SHP text, trust known_locked.
+    """
+    if known_locked is None:
+        return result
+    try:
+        known_locked_i = int(known_locked)
+    except (TypeError, ValueError):
+        return result
+    if known_locked_i <= 0:
+        return result
+    if not _number_exists_in_text(text, known_locked_i):
+        return result
+
+    current = result.get('shp_locked_total')
+    try:
+        current_i = int(current) if current is not None else 0
+    except (TypeError, ValueError):
+        current_i = 0
+
+    # Trigger only when current looks obviously implausible compared to known hint.
+    tiny_artifact = current_i <= 100000 and known_locked_i >= 1000000
+    very_small_ratio = current_i > 0 and known_locked_i >= 100000 and (current_i * 100) < known_locked_i
+    if current_i == known_locked_i or not (tiny_artifact or very_small_ratio or current_i == 0):
+        return result
+
+    patched = dict(result)
+    patched['shp_locked_total'] = known_locked_i
+    return patched
+
+
 def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed: int = None, known_locked: int = None) -> SHPData:
     """
     Parse SHP TXT file using CASCADE of 8 strategies (unified for NSE and BSE)
@@ -283,6 +317,15 @@ def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed:
                     "recovered promoter/public/others from A/B/Total lines"
                 )
                 result = recovered
+
+    # Locked-hint fallback: fix obvious percentage-fragment artifacts (e.g., 9829 instead of 14,344,200).
+    locked_patched = _apply_locked_hint_fallback(result, text, known_locked)
+    if locked_patched is not result and locked_patched.get('shp_locked_total') != result.get('shp_locked_total'):
+        print(
+            f"ℹ️  SHP locked fallback applied: corrected SHP locked from "
+            f"{int(result.get('shp_locked_total') or 0):,} to {int(locked_patched.get('shp_locked_total') or 0):,}"
+        )
+        result = locked_patched
 
     # Check if extraction succeeded
     if not result.get('all_values_found'):
