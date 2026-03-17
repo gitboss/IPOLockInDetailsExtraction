@@ -44,6 +44,58 @@ function has_scrip_meta_column(PDO $pdo): bool
   }
 }
 
+function normalize_symbol_token($raw): string
+{
+  $v = strtoupper(trim((string) $raw));
+  return preg_replace('/[^A-Z0-9\-]/', '', $v);
+}
+
+function rewrite_nse_basename(string $basename, string $oldSymbol, string $newSymbol): string
+{
+  $qOld = preg_quote($oldSymbol, '/');
+  if (preg_match('/^' . $qOld . '-CML(\d+)\.pdf$/i', $basename, $m)) {
+    return $newSymbol . '-CML' . $m[1] . '.pdf';
+  }
+  if (preg_match('/^SHP[-_]' . $qOld . '(.+)$/i', $basename, $m)) {
+    return 'SHP-' . $newSymbol . $m[1];
+  }
+  if (stripos($basename, $oldSymbol) === 0) {
+    return $newSymbol . substr($basename, strlen($oldSymbol));
+  }
+  return $basename;
+}
+
+function resolve_fs_path(string $baseDir, ?string $storedPath): ?string
+{
+  if (!$storedPath) {
+    return null;
+  }
+  $p = str_replace('\\', '/', trim($storedPath));
+  if ($p === '') {
+    return null;
+  }
+  if (preg_match('/^[A-Za-z]:\//', $p) || strpos($p, '/') === 0) {
+    if (strpos($p, '/nile/sme/notices/') === 0) {
+      return $baseDir . substr($p, strlen('/nile/sme/notices'));
+    }
+    return $p;
+  }
+  return $baseDir . '/' . ltrim($p, '/');
+}
+
+function replace_basename_in_stored_path(?string $storedPath, string $newBase): ?string
+{
+  if (!$storedPath) {
+    return $storedPath;
+  }
+  $p = str_replace('\\', '/', $storedPath);
+  $dir = rtrim(dirname($p), '/');
+  if ($dir === '.' || $dir === '') {
+    return $newBase;
+  }
+  return $dir . '/' . $newBase;
+}
+
 // Lightweight API: toggle manual reviewed status from report UI
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'toggle_manual_review')) {
   header('Content-Type: application/json');
@@ -73,6 +125,187 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'toggl
 
     echo json_encode(['ok' => true, 'id' => $id, 'manual_reviewed' => $manual_reviewed]);
   } catch (Exception $e) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+  }
+  exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'rename_symbol')) {
+  header('Content-Type: application/json');
+  try {
+    $pdo = make_pdo($env);
+    $raw = file_get_contents('php://input');
+    $payload = json_decode($raw ?: '{}', true);
+    $id = isset($payload['id']) ? (int) $payload['id'] : 0;
+    $newSymbol = normalize_symbol_token($payload['new_symbol'] ?? '');
+    if ($id <= 0 || $newSymbol === '') {
+      throw new InvalidArgumentException("Invalid id or symbol");
+    }
+
+    $pdo->beginTransaction();
+    $stmt = $pdo->prepare("
+      SELECT id, exchange, unique_symbol, file_name, finalized_at,
+             lockin_pdf_path, shp_pdf_path, lockin_png_path,
+             lockin_txt_java_path, lockin_txt_pdfplumber_path,
+             shp_txt_java_path, shp_txt_pdfplumber_path
+      FROM ipo_processing_log
+      WHERE id = :id
+      FOR UPDATE
+    ");
+    $stmt->execute([':id' => $id]);
+    $rec = $stmt->fetch();
+    if (!$rec) {
+      throw new RuntimeException("Record not found");
+    }
+    if (($rec['exchange'] ?? '') !== 'NSE') {
+      throw new RuntimeException("Rename supported only for NSE records");
+    }
+    if (!empty($rec['finalized_at'])) {
+      throw new RuntimeException("Cannot rename finalized record");
+    }
+
+    // Mandatory NSE master check: new symbol must exist in sme_ipo_master.nse_symbol
+    $masterChk = $pdo->prepare("
+      SELECT 1
+      FROM sme_ipo_master
+      WHERE UPPER(CAST(nse_symbol AS CHAR)) = UPPER(:sym)
+      LIMIT 1
+    ");
+    $masterChk->execute([':sym' => $newSymbol]);
+    if (!$masterChk->fetch()) {
+      throw new RuntimeException("NSE symbol not found in sme_ipo_master.nse_symbol: " . $newSymbol);
+    }
+
+    $oldSymbol = '';
+    if (preg_match('/^NSE:(.+)$/i', (string) $rec['unique_symbol'], $m)) {
+      $oldSymbol = normalize_symbol_token($m[1]);
+    }
+    if ($oldSymbol === '' && preg_match('/^([A-Z0-9\-]+)-CML\d+\.pdf$/i', (string) $rec['file_name'], $m)) {
+      $oldSymbol = normalize_symbol_token($m[1]);
+    }
+    if ($oldSymbol === '') {
+      throw new RuntimeException("Could not derive existing symbol");
+    }
+    if ($oldSymbol === $newSymbol) {
+      $pdo->rollBack();
+      echo json_encode(['ok' => true, 'id' => $id, 'symbol' => $newSymbol, 'message' => 'No change needed']);
+      exit;
+    }
+
+    $oldFileName = (string) $rec['file_name'];
+    if (!preg_match('/^[A-Z0-9\-]+-CML(\d+)\.pdf$/i', $oldFileName, $fm)) {
+      throw new RuntimeException("Unexpected NSE file_name format: " . $oldFileName);
+    }
+    $newFileName = $newSymbol . '-CML' . $fm[1] . '.pdf';
+
+    $dupeStmt = $pdo->prepare("
+      SELECT id FROM ipo_processing_log
+      WHERE exchange = 'NSE' AND file_name = :file_name AND id <> :id
+      LIMIT 1
+    ");
+    $dupeStmt->execute([':file_name' => $newFileName, ':id' => $id]);
+    if ($dupeStmt->fetch()) {
+      throw new RuntimeException("Duplicate target file_name exists: " . $newFileName);
+    }
+
+    $pathCols = [
+      'lockin_pdf_path',
+      'shp_pdf_path',
+      'lockin_png_path',
+      'lockin_txt_java_path',
+      'lockin_txt_pdfplumber_path',
+      'shp_txt_java_path',
+      'shp_txt_pdfplumber_path',
+    ];
+
+    $updates = [
+      'unique_symbol' => 'NSE:' . $newSymbol,
+      'file_name' => $newFileName,
+    ];
+
+    foreach ($pathCols as $col) {
+      $oldPath = $rec[$col] ?? null;
+      if (!$oldPath) {
+        $updates[$col] = $oldPath;
+        continue;
+      }
+      $oldBase = basename(str_replace('\\', '/', $oldPath));
+      $newBase = rewrite_nse_basename($oldBase, $oldSymbol, $newSymbol);
+      $updates[$col] = replace_basename_in_stored_path($oldPath, $newBase);
+    }
+
+    $renamed = [];
+    $skipped = [];
+    foreach ($pathCols as $col) {
+      $oldStored = $rec[$col] ?? null;
+      $newStored = $updates[$col] ?? null;
+      if (!$oldStored || !$newStored || $oldStored === $newStored) {
+        continue;
+      }
+      $oldFs = resolve_fs_path(__DIR__, $oldStored);
+      $newFs = resolve_fs_path(__DIR__, $newStored);
+      if (!$oldFs || !$newFs) {
+        $skipped[] = "$col: unresolved path";
+        continue;
+      }
+      if (!file_exists($oldFs)) {
+        $skipped[] = "$col: source missing";
+        continue;
+      }
+      if (file_exists($newFs)) {
+        throw new RuntimeException("Target already exists for $col: " . basename($newFs));
+      }
+      $newDir = dirname($newFs);
+      if (!is_dir($newDir)) {
+        @mkdir($newDir, 0775, true);
+      }
+      if (!@rename($oldFs, $newFs)) {
+        throw new RuntimeException("Failed to rename file for $col: " . basename($oldFs));
+      }
+      $renamed[] = "$col:" . basename($oldFs) . "->" . basename($newFs);
+    }
+
+    $upd = $pdo->prepare("
+      UPDATE ipo_processing_log
+      SET unique_symbol = :unique_symbol,
+          file_name = :file_name,
+          lockin_pdf_path = :lockin_pdf_path,
+          shp_pdf_path = :shp_pdf_path,
+          lockin_png_path = :lockin_png_path,
+          lockin_txt_java_path = :lockin_txt_java_path,
+          lockin_txt_pdfplumber_path = :lockin_txt_pdfplumber_path,
+          shp_txt_java_path = :shp_txt_java_path,
+          shp_txt_pdfplumber_path = :shp_txt_pdfplumber_path
+      WHERE id = :id
+    ");
+    $upd->execute([
+      ':unique_symbol' => $updates['unique_symbol'],
+      ':file_name' => $updates['file_name'],
+      ':lockin_pdf_path' => $updates['lockin_pdf_path'],
+      ':shp_pdf_path' => $updates['shp_pdf_path'],
+      ':lockin_png_path' => $updates['lockin_png_path'],
+      ':lockin_txt_java_path' => $updates['lockin_txt_java_path'],
+      ':lockin_txt_pdfplumber_path' => $updates['lockin_txt_pdfplumber_path'],
+      ':shp_txt_java_path' => $updates['shp_txt_java_path'],
+      ':shp_txt_pdfplumber_path' => $updates['shp_txt_pdfplumber_path'],
+      ':id' => $id,
+    ]);
+
+    $pdo->commit();
+    echo json_encode([
+      'ok' => true,
+      'id' => $id,
+      'old_symbol' => $oldSymbol,
+      'new_symbol' => $newSymbol,
+      'file_name' => $newFileName,
+      'renamed_files' => $renamed,
+      'skipped' => $skipped,
+    ]);
+  } catch (Exception $e) {
+    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+      $pdo->rollBack();
+    }
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
   }
@@ -163,10 +396,15 @@ try {
     $rec['overlay_rows'] = $ungrouped_by_record[$rec['id']] ?? [];
     // [STRATEGY-TRACKING 2026-03-09] Decode validation_results JSON to access _strategies
     $rec['validation_results'] = $rec['validation_results'] ? json_decode($rec['validation_results'], true) : null;
-    // Extract symbol and code from file_name (format: CODE-SYMBOL-Annexure-I.pdf)
+    // Extract symbol and code from file_name (source of truth from ipo_processing_log)
+    // BSE format: CODE-SYMBOL-Annexure-I.pdf
+    // NSE format: SYMBOL-CML12345.pdf
     if (preg_match('/^([0-9]+)-([A-Z\-]+)-Annexure-I\.pdf$/', $rec['file_name'], $matches)) {
       $rec['exchange_code'] = $matches[1];  // e.g., 544324
       $rec['symbol'] = $matches[2];         // e.g., CITICHEM
+    } elseif (preg_match('/^([A-Z0-9\-]+)-CML([0-9]+)\.pdf$/i', $rec['file_name'], $matches)) {
+      $rec['symbol'] = strtoupper($matches[1]);       // e.g., NEPHRO
+      $rec['exchange_code'] = 'CML' . $matches[2];    // e.g., CML62782
     } else {
       // Fallback: try to extract from unique_symbol
       $parts = explode(':', $rec['unique_symbol']);
@@ -1480,7 +1718,8 @@ try {
 
       // Build file paths - finalized files are moved to 'finalized/' subfolder in same directory
       const pdfFile = normalizeWebPath(s.pdf_file || s.lockin_pdf_path || '');
-      const pdfName = pdfFile ? pdfFile.split('/').pop() : '';
+      // Prefer DB file_name to avoid stale basename from lockin_pdf_path.
+      const pdfName = (s.file_name && String(s.file_name).trim()) ? String(s.file_name).trim() : (pdfFile ? pdfFile.split('/').pop() : '');
       const stem = pdfName ? pdfName.replace(/\.pdf$/i, '') : '';
       const shpName = s.exchange === 'BSE' ? pdfName.replace('I.', 'II.') : 'SHP-' + (s.symbol || '') + '.pdf';
 
@@ -1570,6 +1809,7 @@ try {
       <span class="badge st-${effectiveStatus.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}">${effectiveStatus}</span>
       <span style="font-size:11px">${validStr}</span>
       <span style="font-size:11px">${finalizedStr}</span>
+      ${(!isFinalized && (s.exchange || '').toUpperCase() === 'NSE') ? `<button class="edit-btn" onclick="renameSymbol(${s.id}, '${(s.symbol || '').replace(/'/g, "\\'")}')" title="Rename symbol + files">✎ Rename Symbol</button>` : ''}
       <button class="edit-btn" onclick="openDetailOverlay(${s.id})" title="View detail">📋 Detail</button>
     </div>
     <div class="card-meta" style="display:grid;grid-template-columns:110px 180px 120px 140px 120px 100px;gap:12px 20px;padding:8px 16px;font-size:11px">
@@ -1698,6 +1938,37 @@ try {
       } finally {
         el.disabled = false;
         render();
+      }
+    }
+
+    async function renameSymbol(id, currentSymbol) {
+      const next = prompt(`Enter new NSE symbol for this scrip`, (currentSymbol || '').toUpperCase());
+      if (!next) return;
+      const newSymbol = String(next).trim().toUpperCase().replace(/[^A-Z0-9\-]/g, '');
+      if (!newSymbol) {
+        alert('Invalid symbol.');
+        return;
+      }
+      if (newSymbol === String(currentSymbol || '').toUpperCase()) {
+        return;
+      }
+      if (!confirm(`This will rename symbol/files from ${currentSymbol} to ${newSymbol} for this record. Continue?`)) {
+        return;
+      }
+      try {
+        const res = await fetch('finalized_report.php?action=rename_symbol', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, new_symbol: newSymbol })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error((data && data.error) || `HTTP ${res.status}`);
+        }
+        alert(`Renamed to ${data.new_symbol}. File: ${data.file_name}`);
+        location.reload();
+      } catch (err) {
+        alert(`Rename failed: ${err.message}`);
       }
     }
 
