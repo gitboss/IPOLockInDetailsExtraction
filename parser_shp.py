@@ -126,7 +126,13 @@ def _looks_implausible_shp_parse(result: dict, known_total: int = None, known_lo
     return not _is_result_math_valid(result)
 
 
-def _recover_from_ab_total_lines(text: str, declared_total: int, known_locked: int, base_result: dict) -> dict | None:
+def _recover_from_ab_total_lines(
+    text: str,
+    preferred_total: int | None,
+    declared_total: int,
+    known_locked: int,
+    base_result: dict
+) -> dict | None:
     lines = text.splitlines()
     a_line = None
     b_line = None
@@ -155,7 +161,7 @@ def _recover_from_ab_total_lines(text: str, declared_total: int, known_locked: i
 
     promoter = max(a_nums)
     public = max(b_nums)
-    total = int(declared_total)
+    total = int(preferred_total) if preferred_total is not None else int(declared_total)
     others = total - promoter - public
     if others < 0:
         return None
@@ -259,7 +265,18 @@ def parse_shp_file(txt_path: Path, known_total: int = None, total_hint_computed:
         declared_exists = _number_exists_in_text(text, int(known_total))
         locked_exists = _number_exists_in_text(text, int(known_locked))
         if declared_exists and locked_exists and _looks_implausible_shp_parse(result, known_total, known_locked):
-            recovered = _recover_from_ab_total_lines(text, int(known_total), int(known_locked), result)
+            preferred_total = result.get('total_shares')
+            try:
+                preferred_total = int(preferred_total) if preferred_total is not None else None
+            except (TypeError, ValueError):
+                preferred_total = None
+            recovered = _recover_from_ab_total_lines(
+                text,
+                preferred_total,
+                int(known_total),
+                int(known_locked),
+                result
+            )
             if recovered and _is_result_math_valid(recovered):
                 print(
                     "ℹ️  SHP hint recovery applied: declared+locked hints found in SHP text; "
