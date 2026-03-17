@@ -96,6 +96,32 @@ function replace_basename_in_stored_path(?string $storedPath, string $newBase): 
   return $dir . '/' . $newBase;
 }
 
+function move_stored_file_to_finalized(string $baseDir, ?string $storedPath): bool
+{
+  if (!$storedPath) {
+    return true;
+  }
+  $src = resolve_fs_path($baseDir, $storedPath);
+  if (!$src) {
+    return true;
+  }
+  $src = str_replace('\\', '/', $src);
+  if (!file_exists($src)) {
+    // If source doesn't exist, assume already moved or missing; don't hard-fail.
+    return true;
+  }
+  $srcDir = dirname($src);
+  $destDir = $srcDir . '/finalized';
+  if (!is_dir($destDir)) {
+    @mkdir($destDir, 0775, true);
+  }
+  $dest = $destDir . '/' . basename($src);
+  if (file_exists($dest)) {
+    @unlink($dest);
+  }
+  return @rename($src, $dest);
+}
+
 // Lightweight API: toggle manual reviewed status from report UI
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'toggle_manual_review')) {
   header('Content-Type: application/json');
@@ -377,6 +403,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
              p.computed_total, p.locked_total, p.free_total,
              p.shp_total_shares, p.shp_locked_shares, p.shp_promoter_shares, p.shp_public_shares, p.shp_others_shares,
              p.allotment_date, p.declared_total,
+             p.lockin_pdf_path, p.shp_pdf_path, p.lockin_txt_java_path, p.shp_txt_java_path, p.lockin_png_path,
              COALESCE(p.anchor_letter_url, m.anchor_letter_url) AS anchor_letter_url
       FROM ipo_processing_log p
       LEFT JOIN sme_ipo_master m
@@ -529,13 +556,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
       }
     }
 
+    $autoFinalized = false;
+    $nextStatus = 'VALIDATING';
+    $nextFinalizedAt = null;
+    if ($allPassed) {
+      $ok1 = move_stored_file_to_finalized(__DIR__, $rec['lockin_pdf_path'] ?? null);
+      $ok2 = move_stored_file_to_finalized(__DIR__, $rec['shp_pdf_path'] ?? null);
+      $ok3 = move_stored_file_to_finalized(__DIR__, $rec['lockin_txt_java_path'] ?? null);
+      $ok4 = move_stored_file_to_finalized(__DIR__, $rec['shp_txt_java_path'] ?? null);
+      $ok5 = move_stored_file_to_finalized(__DIR__, $rec['lockin_png_path'] ?? null);
+      if ($ok1 && $ok2 && $ok3 && $ok4 && $ok5) {
+        $nextStatus = 'FINALIZED';
+        $nextFinalizedAt = date('Y-m-d H:i:s');
+        $autoFinalized = true;
+      } else {
+        $errorMessage = "Finalization skipped: File move to finalized/ failed during snapshot finalize";
+        $allPassed = false;
+        $failedCsv = trim(($failedCsv ? $failedCsv . ',' : '') . 'FINALIZE_MOVE');
+      }
+    }
+
     $upd = $pdo->prepare("
       UPDATE ipo_processing_log
       SET validation_results = :validation_results,
           all_rules_passed = :all_rules_passed,
           failed_rules = :failed_rules,
           error_message = :error_message,
-          status = 'VALIDATING',
+          status = :status,
+          finalized_at = :finalized_at,
           processed_at = NOW()
       WHERE id = :id
     ");
@@ -544,6 +592,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
       ':all_rules_passed' => $allPassed ? 1 : 0,
       ':failed_rules' => $failedCsv !== '' ? $failedCsv : null,
       ':error_message' => $errorMessage,
+      ':status' => $nextStatus,
+      ':finalized_at' => $nextFinalizedAt,
       ':id' => $id,
     ]);
 
@@ -551,6 +601,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
       'ok' => true,
       'id' => $id,
       'all_rules_passed' => $allPassed,
+      'auto_finalized' => $autoFinalized,
       'passed_rules' => $passCount,
       'total_rules' => $totalRules,
       'failed_rules' => $failed,
@@ -2294,7 +2345,11 @@ try {
         if (!res.ok || !data.ok) {
           throw new Error((data && data.error) || `HTTP ${res.status}`);
         }
-        alert(`ReValidate complete: ${data.passed_rules}/${data.total_rules} rules passed.`);
+        if (data.auto_finalized) {
+          alert(`ReValidate complete: ${data.passed_rules}/${data.total_rules} rules passed. Scrip auto-finalized.`);
+        } else {
+          alert(`ReValidate complete: ${data.passed_rules}/${data.total_rules} rules passed.`);
+        }
         location.reload();
       } catch (err) {
         alert(`ReValidate failed: ${err.message}`);
