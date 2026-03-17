@@ -255,21 +255,13 @@ try {
       <table id="reportTable">
         <thead>
           <tr class="group">
-            <th colspan="9" class="g-core partition-r">Core</th>
-            <th colspan="4" class="g-lockin partition-r">Lock-in</th>
-            <th colspan="5" class="g-shp">SHP</th>
+            <th colspan="6" class="g-lockin partition-r">Lock-in</th>
+            <th colspan="5" class="g-shp partition-r">SHP</th>
+            <th colspan="9" class="g-core">Core</th>
           </tr>
           <tr class="h2">
+            <th data-type="num" class="num">#</th>
             <th data-type="str" class="left">Rows</th>
-            <th data-type="str" class="left">Symbol</th>
-            <th data-type="num" class="num">Code</th>
-            <th data-type="str" class="left">Company</th>
-            <th data-type="str">Exch</th>
-            <th data-type="str">Finalized</th>
-            <th data-type="date">Allotment</th>
-            <th data-type="date">Listing</th>
-            <th data-type="date" class="partition-r">Processed</th>
-
             <th data-type="num">Declared</th>
             <th data-type="num">Computed</th>
             <th data-type="num">Locked</th>
@@ -279,26 +271,26 @@ try {
             <th data-type="num">SHP Locked</th>
             <th data-type="num">Promoter</th>
             <th data-type="num">Public</th>
-            <th data-type="num">Others</th>
+            <th data-type="num" class="partition-r">Others</th>
+
+            <th data-type="str" class="left">Symbol</th>
+            <th data-type="num" class="num">Code</th>
+            <th data-type="str" class="left">Company</th>
+            <th data-type="str">Exch</th>
+            <th data-type="str">Finalized</th>
+            <th data-type="date">Allotment</th>
+            <th data-type="date">Listing</th>
+            <th data-type="date">Processed</th>
+            <th data-type="str">Status</th>
           </tr>
         </thead>
         <tbody>
-          <?php foreach ($records as $r): ?>
+          <?php $row_no = 0; foreach ($records as $r): $row_no++; ?>
             <tr class="<?php echo $r['is_finalized'] ? 'finalized' : 'not-finalized'; ?>" data-id="<?php echo (int) $r['id']; ?>">
+              <td class="num row-no"><?php echo $row_no; ?></td>
               <td class="left">
                 <button class="exp-btn" data-open="0" onclick="toggleRows(this, <?php echo (int) $r['id']; ?>)">▼</button>
               </td>
-              <td class="left"><?php echo esc($r['symbol']); ?></td>
-              <td class="num"><?php echo esc($r['exchange_code']); ?></td>
-              <td class="left"><?php echo esc($r['company_name']); ?></td>
-              <td><?php echo esc($r['exchange']); ?></td>
-              <td>
-                <span class="status-pill"><?php echo $r['is_finalized'] ? 'FINALIZED' : 'NOT FINALIZED'; ?></span>
-              </td>
-              <td data-sort="<?php echo esc((string) $r['allotment_date']); ?>"><?php echo esc((string) $r['allotment_date'] ?: '-'); ?></td>
-              <td data-sort="<?php echo esc((string) $r['listing_date_actual']); ?>"><?php echo esc((string) $r['listing_date_actual'] ?: '-'); ?></td>
-              <td class="partition-r" data-sort="<?php echo esc((string) $r['processed_at']); ?>"><?php echo esc((string) $r['processed_at'] ?: '-'); ?></td>
-
               <td><?php echo esc(fmt_num($r['declared_total'])); ?></td>
               <td><?php echo esc(fmt_num($r['computed_total'])); ?></td>
               <td><?php echo esc(fmt_num($r['locked_total'])); ?></td>
@@ -308,7 +300,19 @@ try {
               <td><?php echo esc(fmt_num($r['shp_locked_shares'])); ?></td>
               <td><?php echo esc(fmt_num($r['shp_promoter_shares'])); ?></td>
               <td><?php echo esc(fmt_num($r['shp_public_shares'])); ?></td>
-              <td><?php echo esc(fmt_num($r['shp_others_shares'])); ?></td>
+              <td class="partition-r"><?php echo esc(fmt_num($r['shp_others_shares'])); ?></td>
+
+              <td class="left"><?php echo esc($r['symbol']); ?></td>
+              <td class="num"><?php echo esc($r['exchange_code']); ?></td>
+              <td class="left"><?php echo esc($r['company_name']); ?></td>
+              <td><?php echo esc($r['exchange']); ?></td>
+              <td>
+                <span class="status-pill"><?php echo $r['is_finalized'] ? 'FINALIZED' : 'NOT FINALIZED'; ?></span>
+              </td>
+              <td data-sort="<?php echo esc((string) $r['allotment_date']); ?>"><?php echo esc((string) $r['allotment_date'] ?: '-'); ?></td>
+              <td data-sort="<?php echo esc((string) $r['listing_date_actual']); ?>"><?php echo esc((string) $r['listing_date_actual'] ?: '-'); ?></td>
+              <td data-sort="<?php echo esc((string) $r['processed_at']); ?>"><?php echo esc((string) $r['processed_at'] ?: '-'); ?></td>
+              <td><?php echo esc($r['status'] ?: '-'); ?></td>
             </tr>
           <?php endforeach; ?>
         </tbody>
@@ -364,6 +368,7 @@ try {
         const dr = detailMap.get(id);
         if (dr) tbody.appendChild(dr);
       });
+      renumberRows();
 
       clearSortIndicators();
       const target = table.tHead.rows[1].cells[index];
@@ -377,6 +382,14 @@ try {
       const type = th.getAttribute('data-type') || 'str';
       th.addEventListener('click', () => sortByColumn(i, type));
     });
+
+    function renumberRows() {
+      const rows = Array.from(tbody.querySelectorAll('tr')).filter(r => !r.classList.contains('detail-row'));
+      rows.forEach((r, i) => {
+        const cell = r.querySelector('td.row-no');
+        if (cell) cell.textContent = String(i + 1);
+      });
+    }
 
     function buildInnerTable(rows) {
       const tr = rows.map(r => `
@@ -463,4 +476,3 @@ try {
   </script>
 </body>
 </html>
-
