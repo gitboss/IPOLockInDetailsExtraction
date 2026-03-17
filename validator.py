@@ -226,8 +226,8 @@ def validate_rule6(
     legacy_cutoff = "2024-12-02"
     allotment_iso = allotment_date.isoformat() if hasattr(allotment_date, "isoformat") else (str(allotment_date) if allotment_date else None)
     ex_upper = (exchange or "").upper()
-    is_legacy_bse = (
-        ex_upper == "BSE"
+    is_legacy_nse_bse = (
+        ex_upper in {"NSE", "BSE"}
         and allotment_iso is not None
         and allotment_iso <= legacy_cutoff
     )
@@ -247,12 +247,12 @@ def validate_rule6(
             missing.append("anchor_30")
         if anchor_90_count == 0:
             missing.append("anchor_90")
-        if is_legacy_bse:
+        if is_legacy_nse_bse:
             passed = True
             message = (
                 "Anchor letter URL exists but missing required anchor bucket(s): "
                 f"{', '.join(missing)} (anchor_30={anchor_30_count}, anchor_90={anchor_90_count}) "
-                f"(legacy BSE exception: allotment_date {allotment_iso} <= {legacy_cutoff})"
+                f"(legacy {ex_upper} exception: allotment_date {allotment_iso} <= {legacy_cutoff})"
             )
         else:
             passed = False
