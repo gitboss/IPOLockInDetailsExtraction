@@ -109,14 +109,43 @@ try {
 
   $stmt = $pdo->prepare($sql);
   $stmt->execute($params);
-  $events = $stmt->fetchAll();
+  $rows = $stmt->fetchAll();
+
+  // Group by processing_id => one scrip object with nested unlock_events[]
+  $scripMap = [];
+  foreach ($rows as $r) {
+    $pid = (string)($r['processing_id'] ?? '');
+    if ($pid === '') {
+      continue;
+    }
+    if (!isset($scripMap[$pid])) {
+      $scripMap[$pid] = [
+        'processing_id' => (int)$r['processing_id'],
+        'unique_symbol' => $r['unique_symbol'],
+        'exchange' => $r['exchange'],
+        'file_name' => $r['file_name'],
+        'finalized' => (int)$r['finalized'],
+        'company_name' => $r['company_name'],
+        'last_updated' => $r['last_updated'],
+        'unlock_events' => [],
+      ];
+    }
+    $scripMap[$pid]['unlock_events'][] = [
+      'unlock_date' => $r['unlock_date'],
+      'bucket' => $r['bucket'],
+      'shares_unlocked' => (int)$r['shares_unlocked'],
+      'lock_from' => $r['lock_from'],
+    ];
+  }
+  $scrips = array_values($scripMap);
 
   echo json_encode([
     'ok' => true,
     'server_time' => date('Y-m-d H:i:s'),
     'since' => $since,
-    'count' => count($events),
-    'events' => $events,
+    'scrip_count' => count($scrips),
+    'event_count' => count($rows),
+    'scrips' => $scrips,
   ], JSON_UNESCAPED_UNICODE);
 } catch (Exception $e) {
   http_response_code(400);
