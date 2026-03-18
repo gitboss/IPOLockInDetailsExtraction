@@ -100,7 +100,7 @@ try {
     GROUP BY
       p.id, p.unique_symbol, p.exchange, p.file_name, finalized, company_name, r.lockin_date_to, r.bucket
     ORDER BY
-      r.lockin_date_to ASC, p.unique_symbol ASC, r.bucket ASC
+      p.id ASC, r.lockin_date_to ASC, r.bucket ASC
   ";
 
   if ($exchange !== '') {
