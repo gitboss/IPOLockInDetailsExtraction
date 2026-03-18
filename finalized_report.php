@@ -353,12 +353,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'updat
       throw new InvalidArgumentException("Invalid payload");
     }
 
+    $pdo->beginTransaction();
+
     $stmt = $pdo->prepare("
-      SELECT p.finalized_at
+      SELECT r.bucket AS current_bucket, p.finalized_at
       FROM ipo_lockin_rows r
       INNER JOIN ipo_processing_log p ON p.id = r.processing_log_id
       WHERE r.id = :row_id AND r.processing_log_id = :processing_id
       LIMIT 1
+      FOR UPDATE
     ");
     $stmt->execute([
       ':row_id' => $rowId,
@@ -372,15 +375,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'updat
       throw new RuntimeException("Finalized scrip rows cannot be edited");
     }
 
-    $upd = $pdo->prepare("UPDATE ipo_lockin_rows SET bucket = :bucket WHERE id = :row_id AND processing_log_id = :processing_id");
+    $currentBucket = strtolower((string) ($chk['current_bucket'] ?? ''));
+    if ($currentBucket === $bucket) {
+      $pdo->commit();
+      echo json_encode([
+        'ok' => true,
+        'processing_id' => $processingId,
+        'row_id' => $rowId,
+        'bucket' => $bucket,
+        'changed' => false
+      ]);
+      exit;
+    }
+
+    $upd = $pdo->prepare("
+      UPDATE ipo_lockin_rows
+      SET bucket = :bucket
+      WHERE id = :row_id
+        AND processing_log_id = :processing_id
+        AND bucket <> :bucket
+    ");
     $upd->execute([
       ':bucket' => $bucket,
       ':row_id' => $rowId,
       ':processing_id' => $processingId,
     ]);
+    if ($upd->rowCount() < 1) {
+      throw new RuntimeException("Bucket update did not persist");
+    }
 
-    echo json_encode(['ok' => true, 'processing_id' => $processingId, 'row_id' => $rowId, 'bucket' => $bucket]);
+    // Touch parent record only when row actually changed.
+    $touch = $pdo->prepare("UPDATE ipo_processing_log SET updated_at = NOW() WHERE id = :id");
+    $touch->execute([':id' => $processingId]);
+    if ($touch->rowCount() < 1) {
+      throw new RuntimeException("Parent timestamp update failed");
+    }
+
+    $pdo->commit();
+    echo json_encode([
+      'ok' => true,
+      'processing_id' => $processingId,
+      'row_id' => $rowId,
+      'bucket' => $bucket,
+      'changed' => true
+    ]);
   } catch (Exception $e) {
+    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+      $pdo->rollBack();
+    }
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
   }
