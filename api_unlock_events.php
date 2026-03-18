@@ -49,7 +49,7 @@ try {
     throw new InvalidArgumentException("Invalid exchange. Use NSE or BSE.");
   }
 
-  $status = strtoupper(trim((string)($_GET['status'] ?? 'FINALIZED')));
+  $status = strtoupper(trim((string)($_GET['status'] ?? 'ANY')));
   if (!in_array($status, ['FINALIZED', 'ANY'], true)) {
     throw new InvalidArgumentException("Invalid status. Use FINALIZED or ANY.");
   }
@@ -76,6 +76,7 @@ try {
       p.unique_symbol,
       p.exchange,
       p.file_name,
+      CASE WHEN p.status = 'FINALIZED' THEN 1 ELSE 0 END AS finalized,
       COALESCE(m.company_name, m.ipo_name) AS company_name,
       r.lockin_date_to AS unlock_date,
       r.bucket,
@@ -97,7 +98,7 @@ try {
           AND UPPER(CAST(m.nse_symbol AS CHAR)) COLLATE utf8mb4_unicode_ci = UPPER(SUBSTRING_INDEX(p.unique_symbol, ':', -1)) COLLATE utf8mb4_unicode_ci)
     WHERE " . implode(" AND ", $where) . "
     GROUP BY
-      p.id, p.unique_symbol, p.exchange, p.file_name, company_name, r.lockin_date_to, r.bucket
+      p.id, p.unique_symbol, p.exchange, p.file_name, finalized, company_name, r.lockin_date_to, r.bucket
     ORDER BY
       r.lockin_date_to ASC, p.unique_symbol ASC, r.bucket ASC
   ";
@@ -124,4 +125,3 @@ try {
     'error' => $e->getMessage(),
   ], JSON_UNESCAPED_UNICODE);
 }
-
