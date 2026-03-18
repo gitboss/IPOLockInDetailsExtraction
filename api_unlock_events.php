@@ -77,6 +77,10 @@ try {
       p.exchange,
       p.file_name,
       CASE WHEN p.status = 'FINALIZED' THEN 1 ELSE 0 END AS finalized,
+      COALESCE(p.shp_promoter_shares, 0) AS promoter_shares,
+      COALESCE(p.shp_public_shares, 0) AS public_shares,
+      COALESCE(p.shp_others_shares, 0) AS others_shares,
+      COALESCE(p.shp_total_shares, 0) AS total_shares,
       COALESCE(m.company_name, m.ipo_name) AS company_name,
       r.lockin_date_to AS unlock_date,
       r.bucket,
@@ -98,7 +102,9 @@ try {
           AND UPPER(CAST(m.nse_symbol AS CHAR)) COLLATE utf8mb4_unicode_ci = UPPER(SUBSTRING_INDEX(p.unique_symbol, ':', -1)) COLLATE utf8mb4_unicode_ci)
     WHERE " . implode(" AND ", $where) . "
     GROUP BY
-      p.id, p.unique_symbol, p.exchange, p.file_name, finalized, company_name, r.lockin_date_to, r.bucket
+      p.id, p.unique_symbol, p.exchange, p.file_name, finalized,
+      promoter_shares, public_shares, others_shares, total_shares,
+      company_name, r.lockin_date_to, r.bucket
     ORDER BY
       p.id ASC, r.lockin_date_to ASC, r.bucket ASC
   ";
@@ -125,6 +131,10 @@ try {
         'exchange' => $r['exchange'],
         'file_name' => $r['file_name'],
         'finalized' => (int)$r['finalized'],
+        'promoter_shares' => (int)$r['promoter_shares'],
+        'public_shares' => (int)$r['public_shares'],
+        'others_shares' => (int)$r['others_shares'],
+        'total_shares' => (int)$r['total_shares'],
         'company_name' => $r['company_name'],
         'last_updated' => $r['last_updated'],
         'unlock_events' => [],
