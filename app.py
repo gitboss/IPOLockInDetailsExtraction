@@ -70,6 +70,56 @@ EXIT_GEMINI_ERROR = 4
 EXIT_DB_ERROR = 5
 
 
+def _parse_bse_notice_hints(bse_code: str, downloads_dir: Path) -> dict:
+    """
+    Extract listing_date and post_issue_shares from a BSE notice txt file.
+    File name: {code}-{symbol}-notice_java.txt
+    Path: downloads/bse/pdf/notices/txt/{code}-{symbol}-notice_java.txt
+
+    Since only the code is known at call time, globs for {code}-*-notice_java.txt.
+
+    Returns dict with optional keys:
+        'listing_date' (datetime.date)  — from "effective from <day>, <Month D, YYYY>"
+        'shares'       (int)            — from "No. of Securities <N>"
+    """
+    import glob as _glob
+    notice_dir = downloads_dir / "bse" / "pdf" / "notices" / "txt"
+    matches = sorted(_glob.glob(str(notice_dir / f"{bse_code}-*-notice_java.txt")))
+    if not matches:
+        return {}
+
+    try:
+        text = Path(matches[0]).read_text(encoding='utf-8', errors='replace')
+    except Exception:
+        return {}
+
+    result = {}
+
+    # Listing date: "effective from Thursday, April 2, 2026"
+    m = re.search(
+        r'effective\s+from\s+\w+,\s+([A-Za-z]+\s+\d{1,2},?\s+\d{4})',
+        text, re.IGNORECASE
+    )
+    if m:
+        raw = m.group(1).strip().rstrip(',')
+        for fmt in ('%B %d, %Y', '%B %d %Y', '%b %d, %Y', '%b %d %Y'):
+            try:
+                result['listing_date'] = datetime.strptime(raw, fmt).date()
+                break
+            except ValueError:
+                continue
+
+    # Share count: "No. of Securities 5163600"
+    m = re.search(r'No\.\s*of\s*Securities\s+([\d,]+)', text, re.IGNORECASE)
+    if m:
+        try:
+            result['shares'] = int(m.group(1).replace(',', ''))
+        except ValueError:
+            pass
+
+    return result
+
+
 class IPOProcessor:
     """Main processor class that replicates the current project's extraction workflow"""
 
@@ -739,6 +789,28 @@ class IPOProcessor:
             self.bucket_reference_date = None
             self.declared_total = 10000000  # Dummy for dry-run
             self.anchor_letter_url = None
+
+        # BSE-only: supplement missing dates/shares from notice file
+        if self.exchange == 'BSE' and not self.dry_run and not self.no_db:
+            bse_code = self.unique_symbol.split(':')[1] if ':' in (self.unique_symbol or '') else ''
+            if bse_code:
+                notice_hints = _parse_bse_notice_hints(bse_code, DOWNLOADS_DIR)
+                if notice_hints:
+                    filled = []
+                    if not self.listing_date_actual and not self.expected_listing_date:
+                        if notice_hints.get('listing_date'):
+                            self.expected_listing_date = notice_hints['listing_date']
+                            filled.append(f"expected_listing_date={self.expected_listing_date} (notice)")
+                    if not self.declared_total and notice_hints.get('shares'):
+                        self.declared_total = notice_hints['shares']
+                        filled.append(f"declared_total={self.declared_total:,} (notice)")
+                    if filled:
+                        self.bucket_reference_date = (
+                            self.allotment_date
+                            or self.listing_date_actual
+                            or self.expected_listing_date
+                        )
+                        self.log_step(step_num, "✓", f"Notice hints applied: {', '.join(filled)}, BucketRef={self.bucket_reference_date}")
 
         step_num += 1
         return step_num

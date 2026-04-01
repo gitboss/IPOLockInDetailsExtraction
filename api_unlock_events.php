@@ -77,6 +77,8 @@ try {
       p.exchange,
       p.file_name,
       CASE WHEN p.status = 'FINALIZED' THEN 1 ELSE 0 END AS finalized,
+      COALESCE(p.locked_total, 0) AS locked_shares,
+      COALESCE(p.free_total, 0) AS free_shares,
       COALESCE(p.shp_promoter_shares, 0) AS promoter_shares,
       COALESCE(p.shp_public_shares, 0) AS public_shares,
       COALESCE(p.shp_others_shares, 0) AS others_shares,
@@ -103,7 +105,7 @@ try {
     WHERE " . implode(" AND ", $where) . "
     GROUP BY
       p.id, p.unique_symbol, p.exchange, p.file_name, finalized,
-      promoter_shares, public_shares, others_shares, total_shares,
+      locked_shares, free_shares, promoter_shares, public_shares, others_shares, total_shares,
       company_name, r.lockin_date_to, r.bucket
     ORDER BY
       p.id ASC, r.lockin_date_to ASC, r.bucket ASC
@@ -131,6 +133,8 @@ try {
         'exchange' => $r['exchange'],
         'file_name' => $r['file_name'],
         'finalized' => (int)$r['finalized'],
+        'locked_shares' => (int)$r['locked_shares'],
+        'free_shares' => (int)$r['free_shares'],
         'promoter_shares' => (int)$r['promoter_shares'],
         'public_shares' => (int)$r['public_shares'],
         'others_shares' => (int)$r['others_shares'],
