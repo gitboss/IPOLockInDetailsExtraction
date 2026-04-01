@@ -13,6 +13,41 @@ from models import LockinData, SHPData, ValidationResult, ProcessingStatus
 import db
 
 
+def get_master_data_by_url_slug(url_slug_candidates: list) -> Optional[Tuple[date, date, date, int, str]]:
+    """
+    Fallback lookup for pre-listing BSE IPOs where bse_script_code is not yet populated.
+    Queries sme_ipo_master by url_slug instead.
+
+    Args:
+        url_slug_candidates: One or more slug variants to try (e.g. ["highness-microelectronics-ipo"])
+
+    Returns:
+        (allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url)
+        or None if not found
+    """
+    if not url_slug_candidates:
+        return None
+
+    placeholders = ', '.join(['%s'] * len(url_slug_candidates))
+    sql = f"""
+        SELECT allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url
+        FROM sme_ipo_master
+        WHERE url_slug IN ({placeholders})
+        LIMIT 1
+    """
+    result = db.execute_query(sql, url_slug_candidates, fetch="one")
+    if not result:
+        return None
+
+    return (
+        result.get('allotment_date'),
+        result.get('listing_date_actual'),
+        result.get('expected_listing_date'),
+        result.get('post_issue_shares'),
+        result.get('anchor_letter_url'),
+    )
+
+
 def get_master_data(unique_symbol: str) -> Optional[Tuple[date, date, date, int, str]]:
     """
     Get data from sme_ipo_master table

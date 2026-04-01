@@ -53,6 +53,7 @@ from text_utils import is_blank_text_file, get_blank_file_stats
 from validator import validate_all_rules
 from database import (
     get_master_data,
+    get_master_data_by_url_slug,
     save_processing_log,
     update_processing_log_error,
     get_persisted_bucket_issues,
@@ -117,7 +118,55 @@ def _parse_bse_notice_hints(bse_code: str, downloads_dir: Path) -> dict:
         except ValueError:
             pass
 
+    # Company name: "Name of the company Highness Microelectronics Limited"
+    m = re.search(r'Name\s+of\s+the\s+company\s+(.+)', text, re.IGNORECASE)
+    if m:
+        result['company_name'] = m.group(1).strip()
+
     return result
+
+
+def _company_name_to_url_slug_candidates(company_name: str) -> list:
+    """
+    Derive url_slug candidates from a full company name to allow lookup in sme_ipo_master.
+
+    Mirrors the slug generation used when IPO records are first created:
+      - Strip corporate suffixes (Ltd., Limited, Pvt., etc.)
+      - Remove parentheses (keep inner text)
+      - Two & variants: replace with "and" OR remove entirely
+      - Two separator variants: hyphens (new format) and underscores (old format)
+      - Append "-ipo" / "_ipo"
+
+    Returns up to 4 candidate slugs (duplicates collapsed).
+    """
+    # Strip suffixes — double pass handles "Pvt. Ltd."
+    name = re.sub(
+        r'\s+(Ltd\.?|Limited|Pvt\.?|Private|Inc\.?|Corporation|Corp\.?|LLP|PLC)\s*$',
+        '', company_name, flags=re.IGNORECASE,
+    )
+    name = re.sub(
+        r'\s+(Ltd\.?|Limited|Pvt\.?|Private)\s*$',
+        '', name, flags=re.IGNORECASE,
+    ).strip()
+
+    # Remove parentheses but keep inner text
+    name = re.sub(r'[()]', '', name).strip()
+
+    # Two & treatments
+    name_and = re.sub(r'&', 'and', name)
+    name_no_amp = re.sub(r'&', '', name)
+
+    seen = []
+    for variant in [name_and, name_no_amp]:
+        v = variant.strip().lower()
+        v = re.sub(r'[^a-z0-9\s]', ' ', v)   # keep only alphanum + spaces
+        v = re.sub(r'\s+', ' ', v).strip()
+        for sep, suffix in [('-', '-ipo'), ('_', '_ipo')]:
+            slug = v.replace(' ', sep) + suffix
+            if slug not in seen:
+                seen.append(slug)
+
+    return seen
 
 
 class IPOProcessor:
@@ -790,27 +839,57 @@ class IPOProcessor:
             self.declared_total = 10000000  # Dummy for dry-run
             self.anchor_letter_url = None
 
-        # BSE-only: supplement missing dates/shares from notice file
+        # BSE-only: notice file hints — url_slug fallback + supplement
         if self.exchange == 'BSE' and not self.dry_run and not self.no_db:
             bse_code = self.unique_symbol.split(':')[1] if ':' in (self.unique_symbol or '') else ''
             if bse_code:
-                notice_hints = _parse_bse_notice_hints(bse_code, DOWNLOADS_DIR)
-                if notice_hints:
+                notice = _parse_bse_notice_hints(bse_code, DOWNLOADS_DIR)
+                if notice:
                     filled = []
+
+                    # url_slug fallback: bse_script_code not yet in sme_ipo_master (pre-listing)
+                    # Use company name from notice → generate slug → query DB
+                    if not self.bucket_reference_date and notice.get('company_name'):
+                        slug_candidates = _company_name_to_url_slug_candidates(notice['company_name'])
+                        if slug_candidates:
+                            slug_master = get_master_data_by_url_slug(slug_candidates)
+                            if slug_master:
+                                (
+                                    self.allotment_date,
+                                    self.listing_date_actual,
+                                    self.expected_listing_date,
+                                    self.declared_total,
+                                    self.anchor_letter_url,
+                                ) = slug_master
+                                self.bucket_reference_date = (
+                                    self.allotment_date
+                                    or self.listing_date_actual
+                                    or self.expected_listing_date
+                                )
+                                filled.append(
+                                    f"master via url_slug (company='{notice['company_name']}', "
+                                    f"slug={slug_candidates[0]}, BucketRef={self.bucket_reference_date})"
+                                )
+
+                    # Supplement: listing date from notice if still no bucket reference
                     if not self.listing_date_actual and not self.expected_listing_date:
-                        if notice_hints.get('listing_date'):
-                            self.expected_listing_date = notice_hints['listing_date']
+                        if notice.get('listing_date'):
+                            self.expected_listing_date = notice['listing_date']
                             filled.append(f"expected_listing_date={self.expected_listing_date} (notice)")
-                    if not self.declared_total and notice_hints.get('shares'):
-                        self.declared_total = notice_hints['shares']
+
+                    # Supplement: share count from notice if declared_total still missing
+                    if not self.declared_total and notice.get('shares'):
+                        self.declared_total = notice['shares']
                         filled.append(f"declared_total={self.declared_total:,} (notice)")
+
                     if filled:
-                        self.bucket_reference_date = (
-                            self.allotment_date
-                            or self.listing_date_actual
-                            or self.expected_listing_date
-                        )
-                        self.log_step(step_num, "✓", f"Notice hints applied: {', '.join(filled)}, BucketRef={self.bucket_reference_date}")
+                        if not self.bucket_reference_date:
+                            self.bucket_reference_date = (
+                                self.allotment_date
+                                or self.listing_date_actual
+                                or self.expected_listing_date
+                            )
+                        self.log_step(step_num, "✓", f"Notice hints: {', '.join(filled)}")
 
         step_num += 1
         return step_num
