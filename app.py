@@ -126,6 +126,56 @@ def _parse_bse_notice_hints(bse_code: str, downloads_dir: Path) -> dict:
     return result
 
 
+def _parse_nse_lockin_hints(lockin_txt_path: Path) -> dict:
+    """
+    Extract listing_date, post_issue_shares, and company_name from the NSE lock-in TXT.
+
+    For NSE the circular and Annexure I are combined in the same lock-in PDF/TXT, so
+    there is no separate notice file.  Patterns differ from the BSE notice format:
+      - Listing date : "effective from April 07, 2026"  (no day-of-week prefix)
+      - Company name : "Name of the Company Vivid Electromech Limited"  (capital C)
+      - Share count  : "No. of securities 8887800"      (lowercase s)
+    """
+    if not lockin_txt_path or not lockin_txt_path.exists():
+        return {}
+
+    try:
+        text = lockin_txt_path.read_text(encoding='utf-8', errors='replace')
+    except Exception:
+        return {}
+
+    result = {}
+
+    # Listing date: "effective from April 07, 2026"  (no leading day-of-week)
+    m = re.search(
+        r'effective\s+from\s+([A-Za-z]+\s+\d{1,2},?\s+\d{4})',
+        text, re.IGNORECASE
+    )
+    if m:
+        raw = m.group(1).strip().rstrip(',')
+        for fmt in ('%B %d, %Y', '%B %d %Y', '%b %d, %Y', '%b %d %Y'):
+            try:
+                result['listing_date'] = datetime.strptime(raw, fmt).date()
+                break
+            except ValueError:
+                continue
+
+    # Share count: "No. of securities 8887800"
+    m = re.search(r'No\.\s*of\s*securities\s+([\d,]+)', text, re.IGNORECASE)
+    if m:
+        try:
+            result['shares'] = int(m.group(1).replace(',', ''))
+        except ValueError:
+            pass
+
+    # Company name: "Name of the Company Vivid Electromech Limited"
+    m = re.search(r'Name\s+of\s+the\s+Company\s+(.+)', text, re.IGNORECASE)
+    if m:
+        result['company_name'] = m.group(1).strip()
+
+    return result
+
+
 def _company_name_to_url_slug_candidates(company_name: str) -> list:
     """
     Derive url_slug candidates from a full company name to allow lookup in sme_ipo_master.
@@ -839,12 +889,16 @@ class IPOProcessor:
             self.declared_total = 10000000  # Dummy for dry-run
             self.anchor_letter_url = None
 
-        # BSE-only: notice file hints — url_slug fallback + supplement
-        if self.exchange == 'BSE' and not self.dry_run and not self.no_db:
-            bse_code = self.unique_symbol.split(':')[1] if ':' in (self.unique_symbol or '') else ''
-            if bse_code:
-                notice = _parse_bse_notice_hints(bse_code, DOWNLOADS_DIR)
-                if notice:
+        # BSE/NSE: notice file hints — url_slug fallback + supplement
+        if not self.dry_run and not self.no_db:
+            if self.exchange == 'BSE':
+                identifier = self.unique_symbol.split(':')[1] if ':' in (self.unique_symbol or '') else ''
+                notice = _parse_bse_notice_hints(identifier, DOWNLOADS_DIR) if identifier else {}
+            elif self.exchange == 'NSE':
+                notice = _parse_nse_lockin_hints(self.lockin_java_txt)
+            else:
+                notice = {}
+            if notice:
                     filled = []
 
                     # url_slug fallback: bse_script_code not yet in sme_ipo_master (pre-listing)
