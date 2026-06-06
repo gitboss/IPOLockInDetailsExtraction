@@ -54,6 +54,7 @@ from validator import validate_all_rules
 from database import (
     get_master_data,
     get_master_data_by_url_slug,
+    get_master_data_by_normalized_name,
     save_processing_log,
     update_processing_log_error,
     get_persisted_bucket_issues,
@@ -927,10 +928,34 @@ class IPOProcessor:
                                     f"slug={slug_candidates[0]}, BucketRef={self.bucket_reference_date})"
                                 )
                             else:
-                                print(f"\n⚠️  Warning: No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}")
-                                print(f"   Tried slug candidates: {slug_candidates}")
-                                print(f"   anchor_letter_url and dates unavailable — RULE6 will fail if anchor rows exist in PDF")
-                                self.master_not_found_warning = f"No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}"
+                                # Tertiary fallback: normalized company name match
+                                norm_master = get_master_data_by_normalized_name(
+                                    notice['company_name'],
+                                    exchange=self.exchange,
+                                    listing_date=notice.get('listing_date'),
+                                )
+                                if norm_master:
+                                    (
+                                        self.allotment_date,
+                                        self.listing_date_actual,
+                                        self.expected_listing_date,
+                                        self.declared_total,
+                                        self.anchor_letter_url,
+                                    ) = norm_master
+                                    self.bucket_reference_date = (
+                                        self.allotment_date
+                                        or self.listing_date_actual
+                                        or self.expected_listing_date
+                                    )
+                                    filled.append(
+                                        f"master via normalized name (company='{notice['company_name']}', "
+                                        f"BucketRef={self.bucket_reference_date})"
+                                    )
+                                else:
+                                    print(f"\n⚠️  Warning: No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}")
+                                    print(f"   Tried slug candidates: {slug_candidates}")
+                                    print(f"   anchor_letter_url and dates unavailable — RULE6 will fail if anchor rows exist in PDF")
+                                    self.master_not_found_warning = f"No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}"
 
                     # Supplement: listing date from notice if still no bucket reference
                     if not self.listing_date_actual and not self.expected_listing_date:

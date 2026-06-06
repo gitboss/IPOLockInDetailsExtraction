@@ -48,6 +48,99 @@ def get_master_data_by_url_slug(url_slug_candidates: list) -> Optional[Tuple[dat
     )
 
 
+def get_master_data_by_normalized_name(company_name: str, exchange: str = None, listing_date=None) -> Optional[Tuple[date, date, date, int, str]]:
+    """
+    Tertiary fallback: match sme_ipo_master by normalizing both the given company name
+    and the stored company_name / ipo_name fields (strip suffixes + non-alphanum).
+
+    If multiple records match (re-listed company), uses listing_date extracted from the
+    PDF to disambiguate — picks the record whose expected_listing_date or
+    listing_date_actual matches.
+
+    Returns None if zero matches, or if still ambiguous after listing_date filter.
+
+    Args:
+        company_name: Raw company name extracted from the PDF
+        exchange: 'NSE' or 'BSE' — used to narrow the search
+        listing_date: date extracted from the PDF (e.g. from "effective from ...")
+
+    Returns:
+        (allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url)
+        or None if not found or ambiguous
+    """
+    import re as _re
+    # Normalize: strip corporate suffixes, then remove all non-alphanumeric
+    normalized = _re.sub(
+        r'\s+(Ltd\.?|Limited|Pvt\.?|Private|Inc\.?|Corporation|Corp\.?|LLP|PLC)\s*$',
+        '', company_name, flags=_re.IGNORECASE,
+    )
+    normalized = _re.sub(
+        r'\s+(Ltd\.?|Limited|Pvt\.?|Private)\s*$',
+        '', normalized, flags=_re.IGNORECASE,
+    )
+    normalized = _re.sub(r'[^a-zA-Z0-9]', '', normalized).lower().strip()
+    if len(normalized) < 4:
+        return None
+
+    # SQL normalizes stored names the same way using nested REPLACE calls
+    # (works on MySQL 5.7+ and MariaDB without REGEXP_REPLACE)
+    normalize_sql = """
+        LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+            {col},
+            ' ', ''), '.', ''), '-', ''), '_', ''), ',', ''), '(', ''), ')', ''),
+            '/', ''), '&', ''), "'", ''), '"', ''),
+            'limited', ''), 'pvtltd', ''), 'pvt', ''), 'ltd', ''), 'private', ''), 'inc', ''))
+    """
+    company_norm = normalize_sql.format(col='company_name')
+    ipo_norm = normalize_sql.format(col='ipo_name')
+
+    exchange_filter = ''
+    params = [normalized, normalized]
+    if exchange:
+        ex_upper = exchange.upper()
+        if ex_upper == 'NSE':
+            exchange_filter = "AND exchange = 'NSE SME'"
+        elif ex_upper == 'BSE':
+            exchange_filter = "AND exchange = 'BSE SME'"
+
+    sql = f"""
+        SELECT allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url
+        FROM sme_ipo_master
+        WHERE ({company_norm} = %s OR {ipo_norm} = %s)
+        {exchange_filter}
+        LIMIT 5
+    """
+    results = db.execute_query(sql, params + params, fetch="all")
+    if not results:
+        return None
+
+    if len(results) == 1:
+        result = results[0]
+    elif listing_date is not None:
+        # Disambiguate re-listings using listing date from PDF
+        listing_iso = listing_date.isoformat() if hasattr(listing_date, 'isoformat') else str(listing_date)
+        matched = [
+            r for r in results
+            if (r.get('expected_listing_date') and str(r['expected_listing_date']) == listing_iso)
+            or (r.get('listing_date_actual') and str(r['listing_date_actual']) == listing_iso)
+        ]
+        if len(matched) == 1:
+            result = matched[0]
+        else:
+            return None  # Still ambiguous
+    else:
+        return None  # Multiple matches, no listing date to disambiguate
+
+    return (
+        result.get('allotment_date'),
+        result.get('listing_date_actual'),
+        result.get('expected_listing_date'),
+        result.get('post_issue_shares'),
+        result.get('anchor_letter_url'),
+    )
+
+
 def get_master_data(unique_symbol: str) -> Optional[Tuple[date, date, date, int, str]]:
     """
     Get data from sme_ipo_master table
