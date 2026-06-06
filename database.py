@@ -5,9 +5,8 @@ Reuses sme_ipo_master and sme_ipo_lockin_ocr tables
 """
 
 import json
-from datetime import date, datetime
+from datetime import date
 from typing import Optional, Tuple, Dict, Any, List
-from pathlib import Path
 
 from models import LockinData, SHPData, ValidationResult, ProcessingStatus
 import db
@@ -111,7 +110,7 @@ def get_master_data_by_normalized_name(company_name: str, exchange: str = None, 
         {exchange_filter}
         LIMIT 5
     """
-    results = db.execute_query(sql, params + params, fetch="all")
+    results = db.execute_query(sql, params, fetch="all")
     if not results:
         return None
 
