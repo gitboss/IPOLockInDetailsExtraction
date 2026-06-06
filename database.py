@@ -81,12 +81,13 @@ def get_master_data_by_normalized_name(company_name: str, exchange: str = None, 
     if len(normalized) < 4:
         return None
 
-    # SQL normalizes stored names the same way using nested REPLACE calls
-    # (works on MySQL 5.7+ and MariaDB without REGEXP_REPLACE)
+    # SQL normalizes stored names the same way using nested REPLACE calls.
+    # LOWER is applied to the column first so that suffix replacements like 'ltd'
+    # match regardless of the original casing (REPLACE is case-sensitive in MySQL).
     normalize_sql = """
-        LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
             REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-            {col},
+            LOWER({col}),
             ' ', ''), '.', ''), '-', ''), '_', ''), ',', ''), '(', ''), ')', ''),
             '/', ''), '&', ''), "'", ''), '"', ''),
             'limited', ''), 'pvtltd', ''), 'pvt', ''), 'ltd', ''), 'private', ''), 'inc', ''))
