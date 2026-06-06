@@ -12,53 +12,30 @@ from models import LockinData, SHPData, ValidationResult, ProcessingStatus
 import db
 
 
-def get_master_data_by_url_slug(url_slug_candidates: list) -> Optional[Tuple[date, date, date, int, str]]:
+def get_master_data_by_best_match(
+    company_name: str,
+    slug_candidates: list = None,
+    exchange: str = None,
+    listing_date=None,
+) -> Optional[Tuple[date, date, date, int, str]]:
     """
-    Fallback lookup for pre-listing BSE IPOs where bse_script_code is not yet populated.
-    Queries sme_ipo_master by url_slug instead.
+    Fallback lookup when the primary symbol-based lookup fails.
+
+    Fetches all records for the exchange and scores each one against three criteria:
+      - url_slug matches any of the generated slug candidates
+      - normalized company_name matches the search name
+      - normalized ipo_name matches the search name
+
+    A record must match at least one criterion to be a candidate.
+    If multiple candidates exist (re-listed company), listing_date from the PDF is
+    used to pick the one whose expected_listing_date or listing_date_actual matches.
+    Returns None if no match found or still ambiguous after all tie-breaking.
 
     Args:
-        url_slug_candidates: One or more slug variants to try (e.g. ["highness-microelectronics-ipo"])
-
-    Returns:
-        (allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url)
-        or None if not found
-    """
-    if not url_slug_candidates:
-        return None
-
-    placeholders = ', '.join(['%s'] * len(url_slug_candidates))
-    sql = f"""
-        SELECT allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url
-        FROM sme_ipo_master
-        WHERE url_slug IN ({placeholders})
-        LIMIT 1
-    """
-    result = db.execute_query(sql, url_slug_candidates, fetch="one")
-    if not result:
-        return None
-
-    return (
-        result.get('allotment_date'),
-        result.get('listing_date_actual'),
-        result.get('expected_listing_date'),
-        result.get('post_issue_shares'),
-        result.get('anchor_letter_url'),
-    )
-
-
-def get_master_data_by_normalized_name(company_name: str, exchange: str = None, listing_date=None) -> Optional[Tuple[date, date, date, int, str]]:
-    """
-    Tertiary fallback: fetch candidates with a broad LIKE, then normalize both sides
-    in Python to find a match. Handles spelling differences like "Biotech" vs "Biotec".
-
-    If multiple records match (re-listed company), uses listing_date from the PDF to
-    disambiguate. Returns None if zero matches or still ambiguous.
-
-    Args:
-        company_name: Raw company name from the PDF
-        exchange: 'NSE' or 'BSE' — narrows the search
-        listing_date: date from PDF (e.g. "effective from ...") used to disambiguate re-listings
+        company_name:    Raw company name extracted from the PDF
+        slug_candidates: Slug variants generated from company_name
+        exchange:        'NSE' or 'BSE' — restricts the search to that exchange
+        listing_date:    Listing date from the PDF, used to disambiguate re-listings
     """
     import re as _re
 
@@ -67,64 +44,83 @@ def get_master_data_by_normalized_name(company_name: str, exchange: str = None, 
             r'\s*(Ltd\.?|Limited|Pvt\.?|Private|Inc\.?|Corporation|Corp\.?|LLP|PLC)\s*$',
             '', name, flags=_re.IGNORECASE,
         )
-        n = _re.sub(
-            r'\s*(Ltd\.?|Limited|Pvt\.?|Private)\s*$',
-            '', n, flags=_re.IGNORECASE,
-        )
+        n = _re.sub(r'\s*(Ltd\.?|Limited|Pvt\.?|Private)\s*$', '', n, flags=_re.IGNORECASE)
         return _re.sub(r'[^a-zA-Z0-9]', '', n).lower()
 
     normalized = _normalize(company_name)
     if len(normalized) < 4:
         return None
 
-    # Use the first significant word as a broad SQL filter to limit candidates
-    first_word = _re.sub(r'[^a-zA-Z0-9]', '', company_name.split()[0]) if company_name.split() else ''
+    slug_set = set(slug_candidates or [])
 
-    exchange_filter = ''
-    params: list = [f'%{first_word}%', f'%{first_word}%']
+    conditions = []
+    params: list = []
+
     if exchange:
         ex_upper = exchange.upper()
         if ex_upper == 'NSE':
-            exchange_filter = "AND exchange = 'NSE SME'"
+            conditions.append("exchange = 'NSE SME'")
         elif ex_upper == 'BSE':
-            exchange_filter = "AND exchange = 'BSE SME'"
+            conditions.append("exchange = 'BSE SME'")
+
+    # Narrow to recent IPOs only — eliminates all old/finalized records.
+    # A typical IPO cycle is ~30 days from issue_open to listing, so a 60-day
+    # window around the PDF listing date (or 90 days back from today as fallback)
+    # is more than sufficient and keeps the candidate set tiny.
+    if listing_date is not None:
+        listing_iso = listing_date.isoformat() if hasattr(listing_date, 'isoformat') else str(listing_date)
+        conditions.append("""(
+            ABS(DATEDIFF(COALESCE(listing_date_actual, expected_listing_date), %s)) <= 30
+            OR ABS(DATEDIFF(issue_open_date, %s)) <= 60
+        )""")
+        params.extend([listing_iso, listing_iso])
+    else:
+        # No listing date from PDF — fall back to issue_open_date within last 90 days
+        conditions.append("""(
+            issue_open_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+        )""")
+
+    where_clause = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
 
     sql = f"""
         SELECT allotment_date, listing_date_actual, expected_listing_date,
-               post_issue_shares, anchor_letter_url, company_name, ipo_name
+               post_issue_shares, anchor_letter_url,
+               url_slug, company_name, ipo_name
         FROM sme_ipo_master
-        WHERE (company_name LIKE %s OR ipo_name LIKE %s)
-        {exchange_filter}
-        LIMIT 20
+        {where_clause}
     """
-    rows = db.execute_query(sql, params, fetch="all")
+    rows = db.execute_query(sql, params or None, fetch="all")
     if not rows:
         return None
 
-    # Normalize each candidate in Python and keep those that match
-    matched = [
-        r for r in rows
-        if _normalize(r.get('company_name') or '') == normalized
-        or _normalize(r.get('ipo_name') or '') == normalized
-    ]
+    candidates = []
+    for r in rows:
+        slug_hit  = bool(slug_set) and r.get('url_slug') in slug_set
+        name_hit  = _normalize(r.get('company_name') or '') == normalized
+        ipo_hit   = _normalize(r.get('ipo_name') or '') == normalized
+        if slug_hit or name_hit or ipo_hit:
+            candidates.append(r)
 
-    if len(matched) == 0:
+    if len(candidates) == 0:
         return None
-    elif len(matched) == 1:
-        result = matched[0]
-    elif listing_date is not None:
-        listing_iso = listing_date.isoformat() if hasattr(listing_date, 'isoformat') else str(listing_date)
-        date_matched = [
-            r for r in matched
-            if (r.get('expected_listing_date') and str(r['expected_listing_date']) == listing_iso)
-            or (r.get('listing_date_actual') and str(r['listing_date_actual']) == listing_iso)
-        ]
-        if len(date_matched) == 1:
-            result = date_matched[0]
-        else:
-            return None  # Still ambiguous
+    elif len(candidates) == 1:
+        result = candidates[0]
     else:
-        return None  # Multiple matches, no listing date to disambiguate
+        # Multiple candidates within 30 days — extremely rare but possible.
+        # Use listing_date as final tie-breaker if available.
+        if listing_date is not None:
+            listing_iso = listing_date.isoformat() if hasattr(listing_date, 'isoformat') else str(listing_date)
+            date_matched = [
+                r for r in candidates
+                if (r.get('expected_listing_date') and str(r['expected_listing_date']) == listing_iso)
+                or (r.get('listing_date_actual') and str(r['listing_date_actual']) == listing_iso)
+            ]
+            if len(date_matched) == 1:
+                result = date_matched[0]
+            else:
+                return None
+        else:
+            return None
 
     return (
         result.get('allotment_date'),
@@ -133,6 +129,8 @@ def get_master_data_by_normalized_name(company_name: str, exchange: str = None, 
         result.get('post_issue_shares'),
         result.get('anchor_letter_url'),
     )
+
+
 
 
 def get_master_data(unique_symbol: str) -> Optional[Tuple[date, date, date, int, str]]:

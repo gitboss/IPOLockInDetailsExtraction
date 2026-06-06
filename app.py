@@ -53,8 +53,7 @@ from text_utils import is_blank_text_file, get_blank_file_stats
 from validator import validate_all_rules
 from database import (
     get_master_data,
-    get_master_data_by_url_slug,
-    get_master_data_by_normalized_name,
+    get_master_data_by_best_match,
     save_processing_log,
     update_processing_log_error,
     get_persisted_bucket_issues,
@@ -904,58 +903,38 @@ class IPOProcessor:
             if notice:
                     filled = []
 
-                    # url_slug fallback: bse_script_code not yet in sme_ipo_master (pre-listing)
-                    # Use company name from notice → generate slug → query DB
+                    # Master fallback: primary lookup failed — try slug, company name and
+                    # ipo name matching in one pass over all exchange records
                     if not self.bucket_reference_date and notice.get('company_name'):
                         slug_candidates = _company_name_to_url_slug_candidates(notice['company_name'])
-                        if slug_candidates:
-                            slug_master = get_master_data_by_url_slug(slug_candidates)
-                            if slug_master:
-                                (
-                                    self.allotment_date,
-                                    self.listing_date_actual,
-                                    self.expected_listing_date,
-                                    self.declared_total,
-                                    self.anchor_letter_url,
-                                ) = slug_master
-                                self.bucket_reference_date = (
-                                    self.allotment_date
-                                    or self.listing_date_actual
-                                    or self.expected_listing_date
-                                )
-                                filled.append(
-                                    f"master via url_slug (company='{notice['company_name']}', "
-                                    f"slug={slug_candidates[0]}, BucketRef={self.bucket_reference_date})"
-                                )
-                            else:
-                                # Tertiary fallback: normalized company name match
-                                norm_master = get_master_data_by_normalized_name(
-                                    notice['company_name'],
-                                    exchange=self.exchange,
-                                    listing_date=notice.get('listing_date'),
-                                )
-                                if norm_master:
-                                    (
-                                        self.allotment_date,
-                                        self.listing_date_actual,
-                                        self.expected_listing_date,
-                                        self.declared_total,
-                                        self.anchor_letter_url,
-                                    ) = norm_master
-                                    self.bucket_reference_date = (
-                                        self.allotment_date
-                                        or self.listing_date_actual
-                                        or self.expected_listing_date
-                                    )
-                                    filled.append(
-                                        f"master via normalized name (company='{notice['company_name']}', "
-                                        f"BucketRef={self.bucket_reference_date})"
-                                    )
-                                else:
-                                    print(f"\n⚠️  Warning: No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}")
-                                    print(f"   Tried slug candidates: {slug_candidates}")
-                                    print(f"   anchor_letter_url and dates unavailable — RULE6 will fail if anchor rows exist in PDF")
-                                    self.master_not_found_warning = f"No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}"
+                        best_match = get_master_data_by_best_match(
+                            notice['company_name'],
+                            slug_candidates=slug_candidates,
+                            exchange=self.exchange,
+                            listing_date=notice.get('listing_date'),
+                        )
+                        if best_match:
+                            (
+                                self.allotment_date,
+                                self.listing_date_actual,
+                                self.expected_listing_date,
+                                self.declared_total,
+                                self.anchor_letter_url,
+                            ) = best_match
+                            self.bucket_reference_date = (
+                                self.allotment_date
+                                or self.listing_date_actual
+                                or self.expected_listing_date
+                            )
+                            filled.append(
+                                f"master via best-match (company='{notice['company_name']}', "
+                                f"BucketRef={self.bucket_reference_date})"
+                            )
+                        else:
+                            print(f"\n⚠️  Warning: No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}")
+                            print(f"   Tried slug candidates: {slug_candidates}")
+                            print(f"   anchor_letter_url and dates unavailable — RULE6 will fail if anchor rows exist in PDF")
+                            self.master_not_found_warning = f"No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}"
 
                     # Supplement: listing date from notice if still no bucket reference
                     if not self.listing_date_actual and not self.expected_listing_date:
