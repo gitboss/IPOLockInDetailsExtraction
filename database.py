@@ -249,7 +249,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             computed_total, locked_total, free_total,
             shp_total_shares, shp_locked_shares,
             shp_promoter_shares, shp_public_shares, shp_others_shares,
-            allotment_date, listing_date, declared_total,
+            allotment_date, declared_total,
             validation_results, all_rules_passed, failed_rules,
             processed_at
         ) VALUES (
@@ -272,7 +272,6 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             shp_public_shares = VALUES(shp_public_shares),
             shp_others_shares = VALUES(shp_others_shares),
             allotment_date = VALUES(allotment_date),
-            listing_date = VALUES(listing_date),
             declared_total = VALUES(declared_total),
             validation_results = VALUES(validation_results),
             all_rules_passed = VALUES(all_rules_passed),
@@ -301,7 +300,6 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
         status.shp_data.public_shares if status.shp_data else None,
         status.shp_data.others_shares if status.shp_data else None,
         status.allotment_date,
-        status.listing_date,
         status.declared_total,
         validation_json,
         status.all_rules_passed,

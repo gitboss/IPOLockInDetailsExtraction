@@ -160,7 +160,6 @@ class ProcessingStatus:
 
     # From sme_ipo_master
     allotment_date: Optional[date] = None
-    listing_date: Optional[date] = None
     declared_total: Optional[int] = None
 
     # Validation results

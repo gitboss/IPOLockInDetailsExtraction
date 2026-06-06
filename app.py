@@ -1263,7 +1263,6 @@ class IPOProcessor:
             lockin_data=self.lockin_data,
             shp_data=self.shp_data,
             allotment_date=self.allotment_date,
-            listing_date=self.listing_date_actual,
             declared_total=self.declared_total,
             validations=self.validations,
             all_rules_passed=self.all_rules_passed,

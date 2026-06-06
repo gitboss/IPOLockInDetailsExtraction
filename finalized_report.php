@@ -686,8 +686,7 @@ try {
       {$scrip_meta_select},
       p.lockin_pdf_path, p.shp_pdf_path, p.lockin_png_path,
       p.lockin_txt_java_path, p.shp_txt_java_path,
-      m.company_name, m.ipo_name,
-      COALESCE(p.listing_date, m.listing_date_actual) AS listing_date_actual,
+      m.company_name, m.ipo_name, m.listing_date_actual,
       m.nse_symbol, m.bse_script_code
     FROM ipo_processing_log p
     LEFT JOIN sme_ipo_master m
