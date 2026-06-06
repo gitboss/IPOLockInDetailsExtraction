@@ -161,6 +161,7 @@ class ProcessingStatus:
     # From sme_ipo_master
     allotment_date: Optional[date] = None
     declared_total: Optional[int] = None
+    anchor_letter_url: Optional[str] = None
 
     # Validation results
     validations: List[ValidationResult] = field(default_factory=list)

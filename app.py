@@ -1265,6 +1265,7 @@ class IPOProcessor:
             shp_data=self.shp_data,
             allotment_date=self.allotment_date,
             declared_total=self.declared_total,
+            anchor_letter_url=self.anchor_letter_url,
             validations=self.validations,
             all_rules_passed=self.all_rules_passed,
             lockin_pdf=str(self.lockin_pdf_path),

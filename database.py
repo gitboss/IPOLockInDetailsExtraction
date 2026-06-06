@@ -233,7 +233,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             computed_total, locked_total, free_total,
             shp_total_shares, shp_locked_shares,
             shp_promoter_shares, shp_public_shares, shp_others_shares,
-            allotment_date, declared_total,
+            allotment_date, declared_total, anchor_letter_url,
             validation_results, all_rules_passed, failed_rules,
             processed_at
         ) VALUES (
@@ -241,7 +241,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             %s, %s, %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s, %s, %s,
-            %s, %s,
+            %s, %s, %s,
             %s, %s, %s,
             NOW()
         )
@@ -257,6 +257,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             shp_others_shares = VALUES(shp_others_shares),
             allotment_date = VALUES(allotment_date),
             declared_total = VALUES(declared_total),
+            anchor_letter_url = VALUES(anchor_letter_url),
             validation_results = VALUES(validation_results),
             all_rules_passed = VALUES(all_rules_passed),
             failed_rules = VALUES(failed_rules),
@@ -285,6 +286,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
         status.shp_data.others_shares if status.shp_data else None,
         status.allotment_date,
         status.declared_total,
+        status.anchor_letter_url,
         validation_json,
         status.all_rules_passed,
         failed_rules if failed_rules else None,
