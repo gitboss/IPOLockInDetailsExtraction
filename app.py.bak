@@ -282,7 +282,7 @@ class IPOProcessor:
         self.all_rules_passed = False
         self.blank_shp_error = None  # Set if SHP file is blank
         self.blank_lockin_error = None  # Set if lock-in file is blank [BLANK-TXT 2026-03-09]
-        self.master_not_found_warning = None  # Set if sme_ipo_master lookup fails completely
+        self.master_not_found_warning = None  # Set if sme_ipo_master lookup fails
         self.was_finalized = False  # True only when finalization actually succeeds (non-dry run)
 
     @staticmethod
@@ -876,6 +876,7 @@ class IPOProcessor:
             else:
                 print(f"\n⚠️  Warning: No master data found for {self.unique_symbol} in sme_ipo_master")
                 print("   Continuing without allotment_date and declared_total (some validations will be skipped)")
+                self.master_not_found_warning = f"No record in IPO master for symbol: {self.unique_symbol}"
                 self.allotment_date = None
                 self.listing_date_actual = None
                 self.expected_listing_date = None
@@ -903,8 +904,7 @@ class IPOProcessor:
             if notice:
                     filled = []
 
-                    # url_slug fallback: bse_script_code not yet in sme_ipo_master (pre-listing)
-                    # Use company name from notice → generate slug → query DB
+                    # Step 2: url_slug fallback (original logic — exact slug match)
                     if not self.bucket_reference_date and notice.get('company_name'):
                         slug_candidates = _company_name_to_url_slug_candidates(notice['company_name'])
                         if slug_candidates:
@@ -927,9 +927,8 @@ class IPOProcessor:
                                     f"slug={slug_candidates[0]}, BucketRef={self.bucket_reference_date})"
                                 )
 
-                    # Best-match fallback: only runs if slug lookup also failed
-                    # Handles spelling variants (e.g. "Biotec" vs "Biotech") by
-                    # normalising company_name and ipo_name across all exchange records
+                    # Step 3: best-match fallback (only if slug also failed — handles
+                    # spelling variants like "Biotec" vs "Biotech")
                     if not self.bucket_reference_date and notice.get('company_name'):
                         slug_candidates = _company_name_to_url_slug_candidates(notice['company_name'])
                         best_match = get_master_data_by_best_match(
@@ -1386,6 +1385,8 @@ class IPOProcessor:
                 skip_reason = f"Finalization skipped: {reason} | {' | '.join(failed_details)}"
             else:
                 skip_reason = f"Finalization skipped: {reason}"
+            if self.master_not_found_warning:
+                skip_reason = f"{self.master_not_found_warning} | {skip_reason}"
             self.log_step(step_num, "⊗", skip_reason)
             if not self.no_db and self.processing_log_id:
                 update_processing_log_error(self.processing_log_id, skip_reason)
