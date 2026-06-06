@@ -446,7 +446,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
              p.shp_total_shares, p.shp_locked_shares, p.shp_promoter_shares, p.shp_public_shares, p.shp_others_shares,
              p.allotment_date, p.declared_total,
              p.lockin_pdf_path, p.shp_pdf_path, p.lockin_txt_java_path, p.shp_txt_java_path, p.lockin_png_path,
-             COALESCE(p.anchor_letter_url, m.anchor_letter_url) AS anchor_letter_url
+             COALESCE(p.anchor_letter_url, m.anchor_letter_url) AS anchor_letter_url,
+             m.url_slug AS master_url_slug
       FROM ipo_processing_log p
       LEFT JOIN sme_ipo_master m
         ON (p.exchange COLLATE utf8mb4_unicode_ci = 'BSE' COLLATE utf8mb4_unicode_ci
@@ -527,6 +528,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
     $badRule8 = 0;
     $badRule10 = 0;
     $allotment = !empty($rec['allotment_date']) ? $rec['allotment_date'] : null;
+    $masterFound = !empty($rec['master_url_slug']);
     $legacyCutoff = '2024-12-02';
     $ex = strtoupper((string) ($rec['exchange'] ?? ''));
     foreach ($rows as $rw) {
@@ -596,6 +598,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
       if ($parts) {
         $errorMessage .= " | " . implode(" | ", $parts);
       }
+    }
+    if (!$masterFound) {
+      $symbol = $rec['unique_symbol'] ?? '';
+      $masterWarn = "No record in IPO master for symbol: {$symbol} — nse_symbol/bse_script_code may not be populated in sme_ipo_master";
+      $errorMessage = $errorMessage ? $masterWarn . " | " . $errorMessage : $masterWarn;
     }
 
     $autoFinalized = false;
