@@ -281,6 +281,7 @@ class IPOProcessor:
         self.all_rules_passed = False
         self.blank_shp_error = None  # Set if SHP file is blank
         self.blank_lockin_error = None  # Set if lock-in file is blank [BLANK-TXT 2026-03-09]
+        self.master_not_found_warning = None  # Set if sme_ipo_master lookup fails
         self.was_finalized = False  # True only when finalization actually succeeds (non-dry run)
 
     @staticmethod
@@ -874,6 +875,7 @@ class IPOProcessor:
             else:
                 print(f"\n⚠️  Warning: No master data found for {self.unique_symbol} in sme_ipo_master")
                 print("   Continuing without allotment_date and declared_total (some validations will be skipped)")
+                self.master_not_found_warning = f"No record in IPO master for symbol: {self.unique_symbol}"
                 self.allotment_date = None
                 self.listing_date_actual = None
                 self.expected_listing_date = None
@@ -928,6 +930,7 @@ class IPOProcessor:
                                 print(f"\n⚠️  Warning: No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}")
                                 print(f"   Tried slug candidates: {slug_candidates}")
                                 print(f"   anchor_letter_url and dates unavailable — RULE6 will fail if anchor rows exist in PDF")
+                                self.master_not_found_warning = f"No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}"
 
                     # Supplement: listing date from notice if still no bucket reference
                     if not self.listing_date_actual and not self.expected_listing_date:
@@ -1354,6 +1357,8 @@ class IPOProcessor:
                 skip_reason = f"Finalization skipped: {reason} | {' | '.join(failed_details)}"
             else:
                 skip_reason = f"Finalization skipped: {reason}"
+            if self.master_not_found_warning:
+                skip_reason = f"{self.master_not_found_warning} | {skip_reason}"
             self.log_step(step_num, "⊗", skip_reason)
             if not self.no_db and self.processing_log_id:
                 update_processing_log_error(self.processing_log_id, skip_reason)
