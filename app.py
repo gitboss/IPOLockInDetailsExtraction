@@ -924,6 +924,10 @@ class IPOProcessor:
                                     f"master via url_slug (company='{notice['company_name']}', "
                                     f"slug={slug_candidates[0]}, BucketRef={self.bucket_reference_date})"
                                 )
+                            else:
+                                print(f"\n⚠️  Warning: No record in IPO master for company name: '{notice['company_name']}', symbol: {self.unique_symbol}")
+                                print(f"   Tried slug candidates: {slug_candidates}")
+                                print(f"   anchor_letter_url and dates unavailable — RULE6 will fail if anchor rows exist in PDF")
 
                     # Supplement: listing date from notice if still no bucket reference
                     if not self.listing_date_actual and not self.expected_listing_date:
