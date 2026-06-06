@@ -49,54 +49,39 @@ def get_master_data_by_url_slug(url_slug_candidates: list) -> Optional[Tuple[dat
 
 def get_master_data_by_normalized_name(company_name: str, exchange: str = None, listing_date=None) -> Optional[Tuple[date, date, date, int, str]]:
     """
-    Tertiary fallback: match sme_ipo_master by normalizing both the given company name
-    and the stored company_name / ipo_name fields (strip suffixes + non-alphanum).
+    Tertiary fallback: fetch candidates with a broad LIKE, then normalize both sides
+    in Python to find a match. Handles spelling differences like "Biotech" vs "Biotec".
 
-    If multiple records match (re-listed company), uses listing_date extracted from the
-    PDF to disambiguate — picks the record whose expected_listing_date or
-    listing_date_actual matches.
-
-    Returns None if zero matches, or if still ambiguous after listing_date filter.
+    If multiple records match (re-listed company), uses listing_date from the PDF to
+    disambiguate. Returns None if zero matches or still ambiguous.
 
     Args:
-        company_name: Raw company name extracted from the PDF
-        exchange: 'NSE' or 'BSE' — used to narrow the search
-        listing_date: date extracted from the PDF (e.g. from "effective from ...")
-
-    Returns:
-        (allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url)
-        or None if not found or ambiguous
+        company_name: Raw company name from the PDF
+        exchange: 'NSE' or 'BSE' — narrows the search
+        listing_date: date from PDF (e.g. "effective from ...") used to disambiguate re-listings
     """
     import re as _re
-    # Normalize: strip corporate suffixes, then remove all non-alphanumeric
-    normalized = _re.sub(
-        r'\s+(Ltd\.?|Limited|Pvt\.?|Private|Inc\.?|Corporation|Corp\.?|LLP|PLC)\s*$',
-        '', company_name, flags=_re.IGNORECASE,
-    )
-    normalized = _re.sub(
-        r'\s+(Ltd\.?|Limited|Pvt\.?|Private)\s*$',
-        '', normalized, flags=_re.IGNORECASE,
-    )
-    normalized = _re.sub(r'[^a-zA-Z0-9]', '', normalized).lower().strip()
+
+    def _normalize(name: str) -> str:
+        n = _re.sub(
+            r'\s*(Ltd\.?|Limited|Pvt\.?|Private|Inc\.?|Corporation|Corp\.?|LLP|PLC)\s*$',
+            '', name, flags=_re.IGNORECASE,
+        )
+        n = _re.sub(
+            r'\s*(Ltd\.?|Limited|Pvt\.?|Private)\s*$',
+            '', n, flags=_re.IGNORECASE,
+        )
+        return _re.sub(r'[^a-zA-Z0-9]', '', n).lower()
+
+    normalized = _normalize(company_name)
     if len(normalized) < 4:
         return None
 
-    # SQL normalizes stored names the same way using nested REPLACE calls.
-    # LOWER is applied to the column first so that suffix replacements like 'ltd'
-    # match regardless of the original casing (REPLACE is case-sensitive in MySQL).
-    normalize_sql = """
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-            LOWER({col}),
-            ' ', ''), '.', ''), '-', ''), '_', ''), ',', ''), '(', ''), ')', ''),
-            '/', ''), '&', ''), "'", ''), '"', ''),
-            'limited', ''), 'pvtltd', ''), 'pvt', ''), 'ltd', ''), 'private', ''), 'inc', ''))
-    """
-    company_norm = normalize_sql.format(col='company_name')
-    ipo_norm = normalize_sql.format(col='ipo_name')
+    # Use the first significant word as a broad SQL filter to limit candidates
+    first_word = _re.sub(r'[^a-zA-Z0-9]', '', company_name.split()[0]) if company_name.split() else ''
 
     exchange_filter = ''
-    params = [normalized, normalized]
+    params: list = [f'%{first_word}%', f'%{first_word}%']
     if exchange:
         ex_upper = exchange.upper()
         if ex_upper == 'NSE':
@@ -105,28 +90,37 @@ def get_master_data_by_normalized_name(company_name: str, exchange: str = None, 
             exchange_filter = "AND exchange = 'BSE SME'"
 
     sql = f"""
-        SELECT allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url
+        SELECT allotment_date, listing_date_actual, expected_listing_date,
+               post_issue_shares, anchor_letter_url, company_name, ipo_name
         FROM sme_ipo_master
-        WHERE ({company_norm} = %s OR {ipo_norm} = %s)
+        WHERE (company_name LIKE %s OR ipo_name LIKE %s)
         {exchange_filter}
-        LIMIT 5
+        LIMIT 20
     """
-    results = db.execute_query(sql, params, fetch="all")
-    if not results:
+    rows = db.execute_query(sql, params, fetch="all")
+    if not rows:
         return None
 
-    if len(results) == 1:
-        result = results[0]
+    # Normalize each candidate in Python and keep those that match
+    matched = [
+        r for r in rows
+        if _normalize(r.get('company_name') or '') == normalized
+        or _normalize(r.get('ipo_name') or '') == normalized
+    ]
+
+    if len(matched) == 0:
+        return None
+    elif len(matched) == 1:
+        result = matched[0]
     elif listing_date is not None:
-        # Disambiguate re-listings using listing date from PDF
         listing_iso = listing_date.isoformat() if hasattr(listing_date, 'isoformat') else str(listing_date)
-        matched = [
-            r for r in results
+        date_matched = [
+            r for r in matched
             if (r.get('expected_listing_date') and str(r['expected_listing_date']) == listing_iso)
             or (r.get('listing_date_actual') and str(r['listing_date_actual']) == listing_iso)
         ]
-        if len(matched) == 1:
-            result = matched[0]
+        if len(date_matched) == 1:
+            result = date_matched[0]
         else:
             return None  # Still ambiguous
     else:
