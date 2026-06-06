@@ -12,6 +12,34 @@ from models import LockinData, SHPData, ValidationResult, ProcessingStatus
 import db
 
 
+def get_master_data_by_url_slug(url_slug_candidates: list) -> Optional[Tuple[date, date, date, int, str]]:
+    """
+    Fallback lookup for pre-listing IPOs where nse_symbol/bse_script_code is not yet populated.
+    Queries sme_ipo_master by url_slug instead.
+    """
+    if not url_slug_candidates:
+        return None
+
+    placeholders = ', '.join(['%s'] * len(url_slug_candidates))
+    sql = f"""
+        SELECT allotment_date, listing_date_actual, expected_listing_date, post_issue_shares, anchor_letter_url
+        FROM sme_ipo_master
+        WHERE url_slug IN ({placeholders})
+        LIMIT 1
+    """
+    result = db.execute_query(sql, url_slug_candidates, fetch="one")
+    if not result:
+        return None
+
+    return (
+        result.get('allotment_date'),
+        result.get('listing_date_actual'),
+        result.get('expected_listing_date'),
+        result.get('post_issue_shares'),
+        result.get('anchor_letter_url'),
+    )
+
+
 def get_master_data_by_best_match(
     company_name: str,
     slug_candidates: list = None,
@@ -74,11 +102,8 @@ def get_master_data_by_best_match(
             OR ABS(DATEDIFF(issue_open_date, %s)) <= 60
         )""")
         params.extend([listing_iso, listing_iso])
-    else:
-        # No listing date from PDF — fall back to issue_open_date within last 90 days
-        conditions.append("""(
-            issue_open_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-        )""")
+    # No listing date from PDF — no date filter, match all records for the exchange
+    # (same behaviour as the old url_slug and normalized-name lookups)
 
     where_clause = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
 
@@ -224,7 +249,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             computed_total, locked_total, free_total,
             shp_total_shares, shp_locked_shares,
             shp_promoter_shares, shp_public_shares, shp_others_shares,
-            allotment_date, declared_total,
+            allotment_date, listing_date, declared_total,
             validation_results, all_rules_passed, failed_rules,
             processed_at
         ) VALUES (
@@ -232,7 +257,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             %s, %s, %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s, %s, %s,
-            %s, %s,
+            %s, %s, %s,
             %s, %s, %s,
             NOW()
         )
@@ -247,6 +272,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
             shp_public_shares = VALUES(shp_public_shares),
             shp_others_shares = VALUES(shp_others_shares),
             allotment_date = VALUES(allotment_date),
+            listing_date = VALUES(listing_date),
             declared_total = VALUES(declared_total),
             validation_results = VALUES(validation_results),
             all_rules_passed = VALUES(all_rules_passed),
@@ -275,6 +301,7 @@ def save_processing_log(status: ProcessingStatus) -> Optional[int]:
         status.shp_data.public_shares if status.shp_data else None,
         status.shp_data.others_shares if status.shp_data else None,
         status.allotment_date,
+        status.listing_date,
         status.declared_total,
         validation_json,
         status.all_rules_passed,

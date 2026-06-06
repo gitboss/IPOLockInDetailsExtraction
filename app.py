@@ -53,6 +53,7 @@ from text_utils import is_blank_text_file, get_blank_file_stats
 from validator import validate_all_rules
 from database import (
     get_master_data,
+    get_master_data_by_url_slug,
     get_master_data_by_best_match,
     save_processing_log,
     update_processing_log_error,
@@ -903,8 +904,31 @@ class IPOProcessor:
             if notice:
                     filled = []
 
-                    # Master fallback: primary lookup failed — try slug, company name and
-                    # ipo name matching in one pass over all exchange records
+                    # Step 2: url_slug fallback (original logic — exact slug match)
+                    if not self.bucket_reference_date and notice.get('company_name'):
+                        slug_candidates = _company_name_to_url_slug_candidates(notice['company_name'])
+                        if slug_candidates:
+                            slug_master = get_master_data_by_url_slug(slug_candidates)
+                            if slug_master:
+                                (
+                                    self.allotment_date,
+                                    self.listing_date_actual,
+                                    self.expected_listing_date,
+                                    self.declared_total,
+                                    self.anchor_letter_url,
+                                ) = slug_master
+                                self.bucket_reference_date = (
+                                    self.allotment_date
+                                    or self.listing_date_actual
+                                    or self.expected_listing_date
+                                )
+                                filled.append(
+                                    f"master via url_slug (company='{notice['company_name']}', "
+                                    f"slug={slug_candidates[0]}, BucketRef={self.bucket_reference_date})"
+                                )
+
+                    # Step 3: best-match fallback (only if slug also failed — handles
+                    # spelling variants like "Biotec" vs "Biotech")
                     if not self.bucket_reference_date and notice.get('company_name'):
                         slug_candidates = _company_name_to_url_slug_candidates(notice['company_name'])
                         best_match = get_master_data_by_best_match(
@@ -1239,6 +1263,7 @@ class IPOProcessor:
             lockin_data=self.lockin_data,
             shp_data=self.shp_data,
             allotment_date=self.allotment_date,
+            listing_date=self.listing_date_actual,
             declared_total=self.declared_total,
             validations=self.validations,
             all_rules_passed=self.all_rules_passed,
