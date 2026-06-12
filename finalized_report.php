@@ -744,23 +744,41 @@ try {
     $rec['rows'] = $rows_by_record[$rec['id']] ?? [];
     $rec['overlay_rows'] = $ungrouped_by_record[$rec['id']] ?? [];
 
-    // If symbol/code is missing in master, query sme_scrips by ISIN to get it
+    // [DEBUG] per-scrip ISIN backfill
     $ex = strtoupper($rec['exchange'] ?? '');
+    echo "<pre>[ISIN-DEBUG] uid={$rec['unique_symbol']} exchange=$ex bse_script_code=" . ($rec['bse_script_code'] ?? 'NULL') . " nse_symbol=" . ($rec['nse_symbol'] ?? 'NULL') . "</pre>";
+
     $isin = $rec['master_isin'] ?? '';
-    if (!empty($isin) && (($ex === 'BSE' && empty($rec['bse_script_code'])) || ($ex === 'NSE' && empty($rec['nse_symbol'])))) {
+    echo "<pre>[ISIN-DEBUG] master_isin=$isin</pre>";
+
+    $needs_fix = ($ex === 'BSE' && empty($rec['bse_script_code'])) || ($ex === 'NSE' && empty($rec['nse_symbol']));
+    echo "<pre>[ISIN-DEBUG] needs_fix=" . ($needs_fix ? 'YES' : 'NO') . " isin_empty=" . (empty($isin) ? 'YES' : 'NO') . "</pre>";
+
+    if (!empty($isin) && $needs_fix) {
+      echo "<pre>[ISIN-DEBUG] querying sme_scrips WHERE isin=$isin</pre>";
       $scrip = $pdo->prepare("SELECT symbol, code FROM sme_scrips WHERE isin = ? LIMIT 1");
       $scrip->execute([$isin]);
       $s = $scrip->fetch();
+      echo "<pre>[ISIN-DEBUG] sme_scrips result=" . json_encode($s) . "</pre>";
+
       if ($s) {
         if ($ex === 'BSE' && !empty($s['code'])) {
-          $pdo->prepare("UPDATE sme_ipo_master SET bse_script_code = ? WHERE isin = ? AND (bse_script_code IS NULL OR bse_script_code = '')")
-              ->execute([$s['code'], $isin]);
+          echo "<pre>[ISIN-DEBUG] BSE: updating bse_script_code={$s['code']} WHERE isin=$isin</pre>";
+          $stmt = $pdo->prepare("UPDATE sme_ipo_master SET bse_script_code = ? WHERE isin = ? AND (bse_script_code IS NULL OR bse_script_code = '')");
+          $stmt->execute([$s['code'], $isin]);
+          echo "<pre>[ISIN-DEBUG] BSE: rowCount=" . $stmt->rowCount() . "</pre>";
           $rec['bse_script_code'] = $s['code'];
         } elseif ($ex === 'NSE' && !empty($s['symbol'])) {
-          $pdo->prepare("UPDATE sme_ipo_master SET nse_symbol = ? WHERE isin = ? AND (nse_symbol IS NULL OR nse_symbol = '')")
-              ->execute([$s['symbol'], $isin]);
+          echo "<pre>[ISIN-DEBUG] NSE: updating nse_symbol={$s['symbol']} WHERE isin=$isin</pre>";
+          $stmt = $pdo->prepare("UPDATE sme_ipo_master SET nse_symbol = ? WHERE isin = ? AND (nse_symbol IS NULL OR nse_symbol = '')");
+          $stmt->execute([$s['symbol'], $isin]);
+          echo "<pre>[ISIN-DEBUG] NSE: rowCount=" . $stmt->rowCount() . "</pre>";
           $rec['nse_symbol'] = $s['symbol'];
+        } else {
+          echo "<pre>[ISIN-DEBUG] SKIPPED: ex=$ex code=" . ($s['code'] ?? 'NULL') . " symbol=" . ($s['symbol'] ?? 'NULL') . "</pre>";
         }
+      } else {
+        echo "<pre>[ISIN-DEBUG] sme_scrips: NO ROW FOUND for isin=$isin</pre>";
       }
     }
     // [STRATEGY-TRACKING 2026-03-09] Decode validation_results JSON to access _strategies
