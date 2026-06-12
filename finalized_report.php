@@ -2161,7 +2161,7 @@ try {
       const companyName = s.company_name || '';
       return `
   <div class="scrip-card" id="sc-${s.id}">
-    <div style="background:#fffbe6;border:1px solid #f0c040;padding:4px 8px;font-size:11px;font-family:monospace">
+    <div style="background:#fffbe6;border:1px solid #f0c040;padding:4px 8px;font-size:11px;font-family:monospace;color:#000">
       [DEBUG] unique_symbol=${s.unique_symbol} | nse_symbol=${s.nse_symbol || 'NULL'} | bse_script_code=${s.bse_script_code || 'NULL'}
     </div>
     <div class="card-header">
