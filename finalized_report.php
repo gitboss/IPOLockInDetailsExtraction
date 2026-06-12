@@ -683,8 +683,7 @@ try {
       p.lockin_pdf_path, p.shp_pdf_path, p.lockin_png_path,
       p.lockin_txt_java_path, p.shp_txt_java_path,
       m.company_name, m.ipo_name, m.listing_date_actual,
-      m.nse_symbol, m.bse_script_code,
-      ss.isin AS scrips_isin, ss.symbol AS scrips_symbol, ss.code AS scrips_code
+      m.nse_symbol, m.bse_script_code, m.isin AS master_isin
     FROM ipo_processing_log p
     LEFT JOIN sme_scrips ss ON ss.uniqueSymbol = p.unique_symbol
     LEFT JOIN sme_ipo_master m
@@ -695,25 +694,6 @@ try {
       OR (ss.isin IS NOT NULL AND ss.isin != '' AND m.isin = ss.isin)
     ORDER BY p.processed_at DESC
   ")->fetchAll();
-
-  // Per-scrip backfill: for any record where sme_scrips has the ISIN but sme_ipo_master
-  // is still missing the symbol/code, fix it now — only runs for affected scrips.
-  foreach ($records as &$rec) {
-    $ex = strtoupper($rec['exchange'] ?? '');
-    $isin = $rec['scrips_isin'] ?? '';
-    if (empty($isin)) continue;
-
-    if ($ex === 'BSE' && empty($rec['bse_script_code']) && !empty($rec['scrips_code'])) {
-      $pdo->prepare("UPDATE sme_ipo_master SET bse_script_code = ? WHERE isin = ? AND (bse_script_code IS NULL OR bse_script_code = '')")
-          ->execute([$rec['scrips_code'], $isin]);
-      $rec['bse_script_code'] = $rec['scrips_code'];
-    } elseif ($ex === 'NSE' && empty($rec['nse_symbol']) && !empty($rec['scrips_symbol'])) {
-      $pdo->prepare("UPDATE sme_ipo_master SET nse_symbol = ? WHERE isin = ? AND (nse_symbol IS NULL OR nse_symbol = '')")
-          ->execute([$rec['scrips_symbol'], $isin]);
-      $rec['nse_symbol'] = $rec['scrips_symbol'];
-    }
-  }
-  unset($rec);
 
   $rows_raw = $pdo->query("
     SELECT processing_log_id,
@@ -763,6 +743,26 @@ try {
   foreach ($records as &$rec) {
     $rec['rows'] = $rows_by_record[$rec['id']] ?? [];
     $rec['overlay_rows'] = $ungrouped_by_record[$rec['id']] ?? [];
+
+    // If symbol/code is missing in master, query sme_scrips by ISIN to get it
+    $ex = strtoupper($rec['exchange'] ?? '');
+    $isin = $rec['master_isin'] ?? '';
+    if (!empty($isin) && (($ex === 'BSE' && empty($rec['bse_script_code'])) || ($ex === 'NSE' && empty($rec['nse_symbol'])))) {
+      $scrip = $pdo->prepare("SELECT symbol, code FROM sme_scrips WHERE isin = ? LIMIT 1");
+      $scrip->execute([$isin]);
+      $s = $scrip->fetch();
+      if ($s) {
+        if ($ex === 'BSE' && !empty($s['code'])) {
+          $pdo->prepare("UPDATE sme_ipo_master SET bse_script_code = ? WHERE isin = ? AND (bse_script_code IS NULL OR bse_script_code = '')")
+              ->execute([$s['code'], $isin]);
+          $rec['bse_script_code'] = $s['code'];
+        } elseif ($ex === 'NSE' && !empty($s['symbol'])) {
+          $pdo->prepare("UPDATE sme_ipo_master SET nse_symbol = ? WHERE isin = ? AND (nse_symbol IS NULL OR nse_symbol = '')")
+              ->execute([$s['symbol'], $isin]);
+          $rec['nse_symbol'] = $s['symbol'];
+        }
+      }
+    }
     // [STRATEGY-TRACKING 2026-03-09] Decode validation_results JSON to access _strategies
     $rec['validation_results'] = $rec['validation_results'] ? json_decode($rec['validation_results'], true) : null;
     // Extract symbol and code from file_name (source of truth from ipo_processing_log)
