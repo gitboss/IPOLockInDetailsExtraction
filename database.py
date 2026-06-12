@@ -74,15 +74,19 @@ def get_master_data_by_isin(unique_symbol: str) -> Optional[Tuple[date, date, da
     # Backfill symbol/code into sme_ipo_master so primary lookup works next time
     exchange = (result.get('exchange') or '').upper()
     if exchange == 'NSE' and result.get('symbol'):
-        db.execute_query(
-            "UPDATE sme_ipo_master SET nse_symbol = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (nse_symbol IS NULL OR nse_symbol = '')",
-            [result['symbol'], unique_symbol],
-        )
+        db.execute_transaction([
+            (
+                "UPDATE sme_ipo_master SET nse_symbol = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (nse_symbol IS NULL OR nse_symbol = '')",
+                (result['symbol'], unique_symbol),
+            )
+        ])
     elif exchange == 'BSE' and result.get('code'):
-        db.execute_query(
-            "UPDATE sme_ipo_master SET bse_script_code = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (bse_script_code IS NULL OR bse_script_code = '')",
-            [result['code'], unique_symbol],
-        )
+        db.execute_transaction([
+            (
+                "UPDATE sme_ipo_master SET bse_script_code = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (bse_script_code IS NULL OR bse_script_code = '')",
+                (result['code'], unique_symbol),
+            )
+        ])
 
     return (
         result.get('allotment_date'),
