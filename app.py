@@ -54,6 +54,7 @@ from validator import validate_all_rules
 from database import (
     get_master_data,
     get_master_data_by_url_slug,
+    get_master_data_by_isin,
     get_master_data_by_best_match,
     save_processing_log,
     update_processing_log_error,
@@ -926,6 +927,27 @@ class IPOProcessor:
                                     f"master via url_slug (company='{notice['company_name']}', "
                                     f"slug={slug_candidates[0]}, BucketRef={self.bucket_reference_date})"
                                 )
+
+                    # ISIN fallback: only runs if slug also failed.
+                    # Works post-listing (sme_scrips populated); silently skips pre-listing.
+                    if not self.bucket_reference_date:
+                        isin_master = get_master_data_by_isin(self.unique_symbol)
+                        if isin_master:
+                            (
+                                self.allotment_date,
+                                self.listing_date_actual,
+                                self.expected_listing_date,
+                                self.declared_total,
+                                self.anchor_letter_url,
+                            ) = isin_master
+                            self.bucket_reference_date = (
+                                self.allotment_date
+                                or self.listing_date_actual
+                                or self.expected_listing_date
+                            )
+                            filled.append(
+                                f"master via ISIN (symbol={self.unique_symbol}, BucketRef={self.bucket_reference_date})"
+                            )
 
                     # Best-match fallback: only runs if slug lookup also failed
                     # Handles spelling variants (e.g. "Biotec" vs "Biotech") by

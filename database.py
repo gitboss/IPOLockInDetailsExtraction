@@ -48,6 +48,33 @@ def get_master_data_by_url_slug(url_slug_candidates: list) -> Optional[Tuple[dat
     )
 
 
+def get_master_data_by_isin(unique_symbol: str) -> Optional[Tuple[date, date, date, int, str]]:
+    """
+    ISIN-based fallback lookup (post-listing only).
+    Joins sme_scrips → sme_ipo_master via ISIN.
+    sme_scrips is populated only after the scrip lists, so this silently
+    returns None for pre-listing IPOs and the caller falls through to slug/best-match.
+    """
+    sql = """
+        SELECT m.allotment_date, m.listing_date_actual, m.expected_listing_date,
+               m.post_issue_shares, m.anchor_letter_url
+        FROM sme_scrips s
+        JOIN sme_ipo_master m ON m.isin = s.isin AND m.isin != ''
+        WHERE s.uniqueSymbol = %s
+        LIMIT 1
+    """
+    result = db.execute_query(sql, [unique_symbol], fetch="one")
+    if not result:
+        return None
+    return (
+        result.get('allotment_date'),
+        result.get('listing_date_actual'),
+        result.get('expected_listing_date'),
+        result.get('post_issue_shares'),
+        result.get('anchor_letter_url'),
+    )
+
+
 def get_master_data_by_best_match(
     company_name: str,
     slug_candidates: list = None,
