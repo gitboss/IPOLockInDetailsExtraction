@@ -448,7 +448,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
              p.lockin_pdf_path, p.shp_pdf_path, p.lockin_txt_java_path, p.shp_txt_java_path, p.lockin_png_path,
              COALESCE(p.anchor_letter_url, m.anchor_letter_url) AS anchor_letter_url
       FROM ipo_processing_log p
-      LEFT JOIN sme_scrips ss ON ss.uniqueSymbol COLLATE utf8mb4_unicode_ci = p.unique_symbol COLLATE utf8mb4_unicode_ci
+      LEFT JOIN sme_scrips ss ON ss.uniqueSymbol = p.unique_symbol
       LEFT JOIN sme_ipo_master m
         ON (p.exchange COLLATE utf8mb4_unicode_ci = 'BSE' COLLATE utf8mb4_unicode_ci
             AND CAST(m.bse_script_code AS CHAR) COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(p.unique_symbol, ':', -1) COLLATE utf8mb4_unicode_ci)
@@ -684,7 +684,7 @@ try {
       m.company_name, m.ipo_name, m.listing_date_actual,
       m.nse_symbol, m.bse_script_code
     FROM ipo_processing_log p
-    LEFT JOIN sme_scrips ss ON ss.uniqueSymbol COLLATE utf8mb4_unicode_ci = p.unique_symbol COLLATE utf8mb4_unicode_ci
+    LEFT JOIN sme_scrips ss ON ss.uniqueSymbol = p.unique_symbol
     LEFT JOIN sme_ipo_master m
       ON (p.exchange COLLATE utf8mb4_unicode_ci = 'BSE' COLLATE utf8mb4_unicode_ci
           AND CAST(m.bse_script_code AS CHAR) COLLATE utf8mb4_unicode_ci = SUBSTRING_INDEX(p.unique_symbol, ':', -1) COLLATE utf8mb4_unicode_ci)
