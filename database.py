@@ -54,10 +54,14 @@ def get_master_data_by_isin(unique_symbol: str) -> Optional[Tuple[date, date, da
     Joins sme_scrips → sme_ipo_master via ISIN.
     sme_scrips is populated only after the scrip lists, so this silently
     returns None for pre-listing IPOs and the caller falls through to slug/best-match.
+
+    On a successful match, backfills nse_symbol / bse_script_code into sme_ipo_master
+    so the primary lookup works directly on the next run.
     """
     sql = """
         SELECT m.allotment_date, m.listing_date_actual, m.expected_listing_date,
-               m.post_issue_shares, m.anchor_letter_url
+               m.post_issue_shares, m.anchor_letter_url,
+               s.exchange, s.symbol, s.code
         FROM sme_scrips s
         JOIN sme_ipo_master m ON m.isin = s.isin AND m.isin != ''
         WHERE s.uniqueSymbol = %s
@@ -66,6 +70,20 @@ def get_master_data_by_isin(unique_symbol: str) -> Optional[Tuple[date, date, da
     result = db.execute_query(sql, [unique_symbol], fetch="one")
     if not result:
         return None
+
+    # Backfill symbol/code into sme_ipo_master so primary lookup works next time
+    exchange = (result.get('exchange') or '').upper()
+    if exchange == 'NSE' and result.get('symbol'):
+        db.execute_query(
+            "UPDATE sme_ipo_master SET nse_symbol = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (nse_symbol IS NULL OR nse_symbol = '')",
+            [result['symbol'], unique_symbol],
+        )
+    elif exchange == 'BSE' and result.get('code'):
+        db.execute_query(
+            "UPDATE sme_ipo_master SET bse_script_code = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (bse_script_code IS NULL OR bse_script_code = '')",
+            [result['code'], unique_symbol],
+        )
+
     return (
         result.get('allotment_date'),
         result.get('listing_date_actual'),
