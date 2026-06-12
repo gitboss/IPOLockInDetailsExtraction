@@ -68,25 +68,26 @@ def get_master_data_by_isin(unique_symbol: str) -> Optional[Tuple[date, date, da
         LIMIT 1
     """
     result = db.execute_query(sql, [unique_symbol], fetch="one")
+    print(f"   [ISIN] unique_symbol={unique_symbol} result={result}")
     if not result:
         return None
 
     # Backfill symbol/code into sme_ipo_master so primary lookup works next time
     exchange = (result.get('exchange') or '').upper()
-    if exchange == 'NSE' and result.get('symbol'):
-        db.execute_transaction([
-            (
-                "UPDATE sme_ipo_master SET nse_symbol = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (nse_symbol IS NULL OR nse_symbol = '')",
-                (result['symbol'], unique_symbol),
-            )
-        ])
-    elif exchange == 'BSE' and result.get('code'):
-        db.execute_transaction([
-            (
-                "UPDATE sme_ipo_master SET bse_script_code = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (bse_script_code IS NULL OR bse_script_code = '')",
-                (result['code'], unique_symbol),
-            )
-        ])
+    symbol  = result.get('symbol')
+    code    = result.get('code')
+    print(f"   [ISIN] exchange={exchange!r} symbol={symbol!r} code={code!r}")
+
+    if exchange == 'NSE' and symbol:
+        update_sql = "UPDATE sme_ipo_master SET nse_symbol = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (nse_symbol IS NULL OR nse_symbol = '')"
+        ok = db.execute_transaction([(update_sql, (symbol, unique_symbol))])
+        print(f"   [ISIN] NSE backfill nse_symbol={symbol!r} ok={ok}")
+    elif exchange == 'BSE' and code:
+        update_sql = "UPDATE sme_ipo_master SET bse_script_code = %s WHERE isin = (SELECT isin FROM sme_scrips WHERE uniqueSymbol = %s LIMIT 1) AND (bse_script_code IS NULL OR bse_script_code = '')"
+        ok = db.execute_transaction([(update_sql, (code, unique_symbol))])
+        print(f"   [ISIN] BSE backfill bse_script_code={code!r} ok={ok}")
+    else:
+        print(f"   [ISIN] No backfill — exchange not matched or symbol/code empty")
 
     return (
         result.get('allotment_date'),
