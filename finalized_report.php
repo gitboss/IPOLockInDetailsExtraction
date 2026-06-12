@@ -660,6 +660,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_GET['action'] ?? '') === 'reval
 $data_json = '[]';
 try {
   $pdo = make_pdo($env);
+
   $has_scrip_meta = has_scrip_meta_column($pdo);
   $manual_reviewed_select = $has_scrip_meta
     ? "COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(p.scrip_meta, '$.manual_reviewed')) AS UNSIGNED), 0) AS manual_reviewed"
@@ -682,7 +683,8 @@ try {
       p.lockin_pdf_path, p.shp_pdf_path, p.lockin_png_path,
       p.lockin_txt_java_path, p.shp_txt_java_path,
       m.company_name, m.ipo_name, m.listing_date_actual,
-      m.nse_symbol, m.bse_script_code
+      m.nse_symbol, m.bse_script_code,
+      ss.isin AS scrips_isin, ss.symbol AS scrips_symbol, ss.code AS scrips_code
     FROM ipo_processing_log p
     LEFT JOIN sme_scrips ss ON ss.uniqueSymbol = p.unique_symbol
     LEFT JOIN sme_ipo_master m
@@ -693,6 +695,25 @@ try {
       OR (ss.isin IS NOT NULL AND ss.isin != '' AND m.isin = ss.isin)
     ORDER BY p.processed_at DESC
   ")->fetchAll();
+
+  // Per-scrip backfill: for any record where sme_scrips has the ISIN but sme_ipo_master
+  // is still missing the symbol/code, fix it now — only runs for affected scrips.
+  foreach ($records as &$rec) {
+    $ex = strtoupper($rec['exchange'] ?? '');
+    $isin = $rec['scrips_isin'] ?? '';
+    if (empty($isin)) continue;
+
+    if ($ex === 'BSE' && empty($rec['bse_script_code']) && !empty($rec['scrips_code'])) {
+      $pdo->prepare("UPDATE sme_ipo_master SET bse_script_code = ? WHERE isin = ? AND (bse_script_code IS NULL OR bse_script_code = '')")
+          ->execute([$rec['scrips_code'], $isin]);
+      $rec['bse_script_code'] = $rec['scrips_code'];
+    } elseif ($ex === 'NSE' && empty($rec['nse_symbol']) && !empty($rec['scrips_symbol'])) {
+      $pdo->prepare("UPDATE sme_ipo_master SET nse_symbol = ? WHERE isin = ? AND (nse_symbol IS NULL OR nse_symbol = '')")
+          ->execute([$rec['scrips_symbol'], $isin]);
+      $rec['nse_symbol'] = $rec['scrips_symbol'];
+    }
+  }
+  unset($rec);
 
   $rows_raw = $pdo->query("
     SELECT processing_log_id,
