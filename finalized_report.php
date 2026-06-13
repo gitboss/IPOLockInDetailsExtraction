@@ -742,21 +742,20 @@ try {
     $rec['rows'] = $rows_by_record[$rec['id']] ?? [];
     $rec['overlay_rows'] = $ungrouped_by_record[$rec['id']] ?? [];
 
-    // If symbol/code is missing in master, query sme_scrips by ISIN to get it
+    // If symbol/code missing: get ISIN from sme_scrips by uniqueSymbol, check if master has same ISIN, update
     $ex = strtoupper($rec['exchange'] ?? '');
-    $isin = $rec['master_isin'] ?? '';
-    if (!empty($isin) && (($ex === 'BSE' && empty($rec['bse_script_code'])) || ($ex === 'NSE' && empty($rec['nse_symbol'])))) {
-      $scrip = $pdo->prepare("SELECT symbol, code FROM sme_scrips WHERE isin = ? LIMIT 1");
-      $scrip->execute([$isin]);
+    if (($ex === 'BSE' && empty($rec['bse_script_code'])) || ($ex === 'NSE' && empty($rec['nse_symbol']))) {
+      $scrip = $pdo->prepare("SELECT isin, symbol, code FROM sme_scrips WHERE uniqueSymbol = ? LIMIT 1");
+      $scrip->execute([$rec['unique_symbol']]);
       $s = $scrip->fetch();
-      if ($s) {
+      if ($s && !empty($s['isin'])) {
         if ($ex === 'BSE' && !empty($s['code'])) {
           $pdo->prepare("UPDATE sme_ipo_master SET bse_script_code = ? WHERE isin = ? AND (bse_script_code IS NULL OR bse_script_code = '')")
-              ->execute([$s['code'], $isin]);
+              ->execute([$s['code'], $s['isin']]);
           $rec['bse_script_code'] = $s['code'];
         } elseif ($ex === 'NSE' && !empty($s['symbol'])) {
           $pdo->prepare("UPDATE sme_ipo_master SET nse_symbol = ? WHERE isin = ? AND (nse_symbol IS NULL OR nse_symbol = '')")
-              ->execute([$s['symbol'], $isin]);
+              ->execute([$s['symbol'], $s['isin']]);
           $rec['nse_symbol'] = $s['symbol'];
         }
       }
@@ -2161,9 +2160,6 @@ try {
       const companyName = s.company_name || '';
       return `
   <div class="scrip-card" id="sc-${s.id}">
-    <div style="background:#fffbe6;border:1px solid #f0c040;padding:4px 8px;font-size:11px;font-family:monospace;color:#000">
-      [DEBUG] unique_symbol=${s.unique_symbol} | nse_symbol=${s.nse_symbol || 'NULL'} | bse_script_code=${s.bse_script_code || 'NULL'}
-    </div>
     <div class="card-header">
       <div style="display:flex;flex-direction:column;gap:4px">
         <div style="display:flex;align-items:center;gap:8px">
